@@ -107,9 +107,17 @@
       "framework": "structured_cad_engine",
       "template": "Boali_Hospital_Standard",
       "formats": [
+        "pdf",
         "docx",
-        "txt",
         "clipboard"
+      ],
+      "features": [
+        "consultant_grade_2page_pdf",
+        "official_boali_hospital_header",
+        "embedded_key_figures_montage",
+        "structured_anatomical_findings",
+        "bilingual_persian_and_english_pacs",
+        "digital_verification_stamp"
       ]
     }
   }
