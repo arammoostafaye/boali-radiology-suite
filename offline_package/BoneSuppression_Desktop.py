@@ -187,12 +187,13 @@ DEFAULT_PASS_HASH = "912863a494a953280178cd8812895062696e4493e3c764f9e58c49bfaa6
 HOSPITAL_TITLE = "بیمارستان بوعلی مریوان"
 NETWORK_TITLE = "شبکه بهداشت و درمان مریوان"
 DEVELOPER_NAME = "آرام مصطفائی"
-APP_VERSION = "2.8.4"
-APP_TITLE = f"پلتفرم تخصصی هوش مصنوعی رادیولوژی {HOSPITAL_TITLE} | {DEVELOPER_NAME} (نگارش v{APP_VERSION})"
+APP_VERSION = "3.0.0"
+APP_NAME_BASE = "نرم افزار تخصصی واحد تصویر برداری بیمارستان بوعلی - آرام مصطفائی"
+APP_TITLE = f"{APP_NAME_BASE} (نگارش v{APP_VERSION})"
 DEVELOPER_ROLE = "پرسنل واحد امور تصویربرداری بیمارستان بوعلی"
 DEVELOPER_PHONES = ["09356808002", "09188766949"]
 DEVELOPER_EMAIL = "arammoostafaye@gmail.com"
-DEVELOPER_GITHUB = "https://github.com/arammoostafaye"
+DEVELOPER_GITHUB = "https://github.com/arammoostafaye/boali-radiology-suite"
 UPSTREAM_SOURCE = "https://huggingface.co/qureaiorg/bone-suppression"
 
 # -----------------------------------------------------------------------------
@@ -1127,8 +1128,8 @@ class ModernAboutDialog(tk.Toplevel):
         title_frame = tk.Frame(header, bg=C_HEADER)
         title_frame.pack(side=tk.LEFT, padx=22, pady=12)
 
-        tk.Label(title_frame, text="🫁 BoneSuppression AI - Multi-AI Chest Studio",
-                 font=("Segoe UI", 13, "bold"), fg=C_CYAN, bg=C_HEADER).pack(anchor=tk.W)
+        tk.Label(title_frame, text=f"🏥 {APP_NAME_BASE}",
+                 font=("Segoe UI", 12, "bold"), fg=C_CYAN, bg=C_HEADER).pack(anchor=tk.W)
         tk.Label(title_frame, text=f"نگارش v{APP_VERSION} | {HOSPITAL_TITLE} - {NETWORK_TITLE}",
                  font=("Segoe UI", 9), fg=C_TEXT_MUTED, bg=C_HEADER).pack(anchor=tk.W, pady=(2, 0))
 
@@ -1218,7 +1219,7 @@ class ModernAboutDialog(tk.Toplevel):
 
         c2_head = tk.Frame(card2, bg=C_CARD)
         c2_head.pack(fill=tk.X, padx=16, pady=(12, 6))
-        tk.Label(c2_head, text=f"🧠 ۵ موتور هوش مصنوعی یکپارچه‌شده در نسخه v{APP_VERSION}",
+        tk.Label(c2_head, text=f"🧠 ۶ موتور هوش مصنوعی و پردازش سه‌بعدی یکپارچه‌شده در نسخه v{APP_VERSION}",
                  font=("Segoe UI", 10, "bold"), fg=C_AMBER, bg=C_CARD).pack(anchor=tk.W)
 
         engines = [
@@ -1230,7 +1231,9 @@ class ModernAboutDialog(tk.Toplevel):
              "غربالگری کاردیومگالی، پلورال افیوژن، پنوموتوراکس، پنومونی، ندول و توده‌ها به همراه خط‌کش کالیبره CTR."),
             ("۴. استودیوی غربالگری جامع ماموگرافی ۴ نمایه (Bilateral FFDM 4-View & BI-RADS)",
              "تحلیل تقارن دوطرفه پستان‌ها در ۴ نمای استاندارد R-CC, L-CC, R-MLO, L-MLO، تخمین دانسیته ACR و رده‌بندی BI-RADS."),
-            ("۵. سامانه صدور خودکار گزارش بالینی استاندارد بیمارستان (Clinical Reporting Engine)",
+            ("۵. استودیوی بازسازی سه‌بعدی سی‌تی اسکن (3D CT Reconstruction Studio)",
+             "تبدیل مقاطع خام ۲D محوری سی‌تی اسکن به مدل‌های سه‌بعدی چرخشی ۳۶۰ درجه با پریست‌های تخصصی ارتوپدی و تروما، جمجمه، ستون فقرات، لگن و آنژیوگرافی عروق و خروجی STL پرینت سه‌بعدی."),
+            ("۶. سامانه صدور خودکار گزارش بالینی استاندارد بیمارستان (Clinical Reporting Engine)",
              "تولید رسمی گزارش دوزبانه انگلیسی و فارسی منطبق با ساختار استاندارد بیمارستان بوعلی با قابلیت صدور فایل Word (.docx) و کپی در HIS.")
         ]
         for title, detail in engines:
@@ -2044,10 +2047,10 @@ class MedalPacsModal(tk.Toplevel):
 
 
 class BoneSuppressionApp(tk.Tk):
-    """BoneSuppression AI Desktop Workstation with integrated multi-AI suites and dockable sidebar."""
+    """BoneSuppression AI Desktop Workstation with integrated multi-AI suites, 3D CT reconstruction, and dockable sidebar."""
     def __init__(self):
         super().__init__()
-        self.title(f"پلتفرم تخصصی هوش مصنوعی رادیولوژی {HOSPITAL_TITLE} | {DEVELOPER_NAME} (نگارش v{APP_VERSION})")
+        self.title(f"{APP_NAME_BASE} (نگارش v{APP_VERSION})")
         self.geometry("1320x860")
         self.minsize(1100, 720)
         self.configure(bg=C_CANVAS)
@@ -2328,7 +2331,7 @@ class BoneSuppressionApp(tk.Tk):
         brand_frame = tk.Frame(header_bar, bg=C_HEADER)
         brand_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=14, pady=6)
 
-        tk.Label(brand_frame, text=f"🏥 پلتفرم تخصصی هوش مصنوعی رادیولوژی {HOSPITAL_TITLE} | {DEVELOPER_NAME} (نگارش v{APP_VERSION})",
+        tk.Label(brand_frame, text=f"🏥 {APP_NAME_BASE} (نگارش v{APP_VERSION})",
                  font=("Segoe UI", 11, "bold"), fg=C_CYAN, bg=C_HEADER, anchor="w").pack(side=tk.LEFT)
 
         tk.Label(right_header, text="👤 boalimri.ir", font=("Segoe UI", 9, "bold"), fg="#10b981", bg="#0b0f19",
@@ -2355,6 +2358,10 @@ class BoneSuppressionApp(tk.Tk):
         btn_pacs = create_modern_button(toolbar, "🌐 دریافت از پکس مدال", self.open_pacs_modal,
                                         bg="#0284c7", hover_bg="#0369a1", font=("Segoe UI", 9, "bold"), padx=12, pady=6)
         btn_pacs.pack(side=tk.LEFT, padx=6, pady=8)
+
+        btn_3d_ct = create_modern_button(toolbar, "🩻 استودیوی ۳D سی‌تی اسکن", self.open_3d_ct_studio,
+                                         bg="#7c3aed", hover_bg="#6d28d9", font=("Segoe UI", 9, "bold"), padx=12, pady=6)
+        btn_3d_ct.pack(side=tk.LEFT, padx=6, pady=8)
 
         self.btn_run_active = create_modern_button(toolbar, "⚡ اجرای جداسازی استخوان", self.run_active_engine,
                                                    bg=C_GREEN, hover_bg=C_GREEN_HOVER, font=("Segoe UI", 9, "bold"), padx=16, pady=6)
@@ -2455,13 +2462,14 @@ class BoneSuppressionApp(tk.Tk):
             ("fracture", "🦴 شکستگی"),
             ("pathology", "🫁 ۱۸ بیماری & CTR"),
             ("mammo", "🩺 ماموگرافی"),
+            ("ct3d", "🧊 ۳D سی‌تی"),
         ]
         for mod_id, mod_label in modules:
             b = tk.Button(selector_frame, text=mod_label, font=("Segoe UI", 8, "bold" if mod_id == "suppress" else "normal"),
                           bg=C_BLUE if mod_id == "suppress" else C_SLATE, fg="white",
-                          activebackground=C_BLUE_HOVER, relief=tk.FLAT, bd=0, padx=6, pady=5, cursor="hand2",
+                          activebackground=C_BLUE_HOVER, relief=tk.FLAT, bd=0, padx=4, pady=5, cursor="hand2",
                           command=lambda m=mod_id: self.select_ai_module(m))
-            b.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+            b.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=1)
             self.mod_btns[mod_id] = b
 
         tk.Frame(self.sidebar_frame, bg=C_BORDER_SUBTLE, height=1).pack(fill=tk.X, padx=8, pady=4)
@@ -2518,6 +2526,8 @@ class BoneSuppressionApp(tk.Tk):
             self.btn_run_active.config(text="🫁 غربالگری ۱۸ بیماری ریه", bg="#7c3aed", activebackground="#8b5cf6")
         elif mod_id == "mammo":
             self.btn_run_active.config(text="🩺 آنالیز ماموگرافی ۴ نمایه", bg="#ec4899", activebackground="#db2777")
+        elif mod_id == "ct3d":
+            self.btn_run_active.config(text="🧊 استودیوی ۳D سی‌تی اسکن", bg="#7c3aed", activebackground="#6d28d9")
 
         self.refresh_sidebar_ui()
         self.render_view()
@@ -2535,6 +2545,25 @@ class BoneSuppressionApp(tk.Tk):
             self.render_sidebar_pathology()
         elif mod == "mammo":
             self.render_sidebar_mammo()
+        elif mod == "ct3d":
+            self.render_sidebar_ct3d()
+
+    def render_sidebar_ct3d(self):
+        tk.Label(self.sb_body, text="🧊 استودیوی بازسازی سه‌بعدی سی‌تی اسکن (v3.0.0)", font=("Segoe UI", 9, "bold"),
+                 fg=C_CYAN, bg=C_CARD).pack(anchor=tk.W, pady=(4, 2))
+        info_txt = "تبدیل مقاطع خام محوری ۲D سی‌تی اسکن به حجم سه‌بعدی چرخان ۳۶۰ درجه با پریست‌های تخصصی ارتوپدی، جمجمه، ستون فقرات، لگن و آنژیوگرافی عروق."
+        tk.Label(self.sb_body, text=info_txt, font=("Segoe UI", 8), fg=C_TEXT_MUTED, bg=C_CARD,
+                 justify=tk.RIGHT, wraplength=310).pack(anchor=tk.W, pady=(0, 8))
+
+        btn_launch = tk.Button(self.sb_body, text="🚀 ورود به استودیوی بازسازی ۳D", font=("Segoe UI", 9, "bold"),
+                               bg="#7c3aed", fg="white", activebackground="#6d28d9", relief=tk.FLAT, pady=6, cursor="hand2",
+                               command=self.open_3d_ct_studio)
+        btn_launch.pack(fill=tk.X, pady=(4, 6))
+
+        btn_pacs_ct = tk.Button(self.sb_body, text="🌐 دریافت سی‌تی اسکن از پکس مدال", font=("Segoe UI", 8),
+                                bg=C_SLATE, fg=C_TEXT_LIGHT, relief=tk.FLAT, pady=4, cursor="hand2",
+                                command=self.open_pacs_modal)
+        btn_pacs_ct.pack(fill=tk.X, pady=2)
 
     def render_sidebar_suppress(self):
         tk.Label(self.sb_body, text="🩻 ماژول حذف استخوان (Qure.ai)", font=("Segoe UI", 9, "bold"),
@@ -2756,6 +2785,8 @@ class BoneSuppressionApp(tk.Tk):
             self.run_pathology_inference()
         elif mod == "mammo":
             self.run_mammo_inference()
+        elif mod == "ct3d":
+            self.open_3d_ct_studio()
 
     def run_suppression_inference(self):
         """Runs Qure.ai TorchScript bone suppression model."""
@@ -3630,6 +3661,17 @@ class BoneSuppressionApp(tk.Tk):
             self.status_label.config(text=f"✓ کلیشه پکس بارگذاری شد: {self.patient_info.get('name', '')}")
         except Exception as e:
             messagebox.showerror("خطا در بارگذاری دایکام", str(e))
+
+    def open_3d_ct_studio(self, folder=None):
+        try:
+            from boali_ct_3d_studio_dialog import Boali3DCTStudioDialog
+            Boali3DCTStudioDialog(self, default_folder=folder, report_callback=self.on_3d_snapshot_received)
+        except Exception as ex:
+            messagebox.showerror("خطا در بازسازی ۳D", f"خطا در اجرای استودیوی بازسازی سه‌بعدی سی‌تی اسکن:\n{ex}")
+
+    def on_3d_snapshot_received(self, frame_bgr):
+        self.last_3d_snapshot = frame_bgr
+        self.status_label.config(text="✓ نمای ۳D سی‌تی اسکن به مستندات بالینی افزوده شد.")
 
     def open_report_dialog(self):
         mod = self.active_ai_module.get()
