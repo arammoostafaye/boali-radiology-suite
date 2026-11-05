@@ -1,11 +1,12 @@
 @echo off
 setlocal enabledelayedexpansion
-title BoneSuppression AI - Multi-AI Quick Updater (v2.8.4)
+title نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی (v3.0.0)
 color 0f
 
 echo ======================================================================
-echo   BoneSuppression AI - انتقال و اتصال خودکار وزن‌های مدل قبلی
-echo   بیمارستان بوعلی مریوان - شبکه بهداشت و درمان مریوان
+echo   نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی
+echo   بسته‌ساز و به‌روزرسان جامع نگارش v3.0.0
+echo   شبکه بهداشت و درمان مریوان - بیمارستان بوعلی
 echo ======================================================================
 echo.
 
@@ -60,7 +61,7 @@ echo [✓] انتقال وزن‌های قبلی با موفقیت انجام ش
 echo.
 
 :check_new_models
-echo [✓] بررسی مدل‌های جدید ماموگرافی، شکستگی و بیماری‌های ریه...
+echo [✓] بررسی مدل‌های ماموگرافی، شکستگی و بیماری‌های ریه...
 if not exist "%TARGET_DIR%\mammo_resnet50.pt" (
     if exist "%~dp0weights\mammo_resnet50.pt" copy /y "%~dp0weights\mammo_resnet50.pt" "%TARGET_DIR%\" >nul
 )
@@ -74,11 +75,38 @@ if not exist "%TARGET_DIR%\cxr_densenet18.ts" (
     if exist "%~dp0weights\cxr_densenet18.ts" copy /y "%~dp0weights\cxr_densenet18.ts" "%TARGET_DIR%\" >nul
 )
 
+:copy_scripts_to_internal
+if exist "%~dp0_internal" (
+    echo [✓] همگام‌سازی کدهای پایتون و فونت‌ها در پوشه _internal...
+    if exist "%~dp0BoneSuppression_Desktop.py" copy /y "%~dp0BoneSuppression_Desktop.py" "%~dp0_internal\" >nul
+    if exist "%~dp0boali_ct_3d_engine.py" copy /y "%~dp0boali_ct_3d_engine.py" "%~dp0_internal\" >nul
+    if exist "%~dp0boali_ct_3d_studio_dialog.py" copy /y "%~dp0boali_ct_3d_studio_dialog.py" "%~dp0_internal\" >nul
+    if exist "%~dp0boali_pdf_report_generator.py" copy /y "%~dp0boali_pdf_report_generator.py" "%~dp0_internal\" >nul
+    if exist "%~dp0pacs_downloader.py" copy /y "%~dp0pacs_downloader.py" "%~dp0_internal\" >nul
+    if exist "%~dp0fonts" xcopy /y /e /i "%~dp0fonts" "%~dp0_internal\fonts" >nul
+)
+
 :launch
 echo ======================================================================
-echo اجرای پلتفرم تخصصی هوش مصنوعی رادیولوژی بیمارستان بوعلی مریوان (v2.8.4)...
+echo اجرای نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی (v3.0.0)...
 echo ======================================================================
+
+python --version >nul 2>&1
+if %errorlevel% equ 0 (
+    echo [اطلاع] اجرای مستقیم آخرین نگارش پایتون بدون نیاز به کامپایل مجدد...
+    start "" pythonw "%~dp0BoneSuppression_Desktop.py"
+    exit /b 0
+)
+
 if exist "%~dp0BoneSuppressionAI.exe" (
     start "" "%~dp0BoneSuppressionAI.exe"
+    exit /b 0
 )
+
+if exist "%~dp0dist\BoneSuppressionAI\BoneSuppressionAI.exe" (
+    start "" "%~dp0dist\BoneSuppressionAI\BoneSuppressionAI.exe"
+    exit /b 0
+)
+
+echo [اطلاع] برنامه در حال اجراست...
 exit /b 0

@@ -253,6 +253,7 @@ class ClinicalReportModal(tk.Toplevel):
     def __init__(self, parent, report_type="mammo", patient_info=None, app_state=None):
         super().__init__(parent)
         self.parent = parent
+        self.app = getattr(parent, "app", parent)
         self.report_type = tk.StringVar(value=report_type)
         self.app_state = app_state or {}
         self.patient_info = patient_info or {}
@@ -306,6 +307,7 @@ class ClinicalReportModal(tk.Toplevel):
 
         types = [
             ("mammo", "🩺 ماموگرافی جامع ۴ نمایه (Bilateral 4-View)", "#ec4899"),
+            ("ct3d", "🧊 سی‌تی اسکن و ۳D (MDCT 3D)", "#0284c7"),
             ("chest", "🫁 رادیوگرافی قفسه سینه (Chest X-Ray)", "#8b5cf6"),
             ("ortho", "🦴 ارتوپدی و شکستگی (Musculoskeletal)", "#f59e0b")
         ]
@@ -563,6 +565,17 @@ class ClinicalReportModal(tk.Toplevel):
             elif hasattr(self.app, "last_3d_snapshot") and self.app.last_3d_snapshot is not None:
                 montage_path = os.path.join(EXE_DIR, "temp_3d_pdf_fig.jpg")
                 cv2.imwrite(montage_path, self.app.last_3d_snapshot)
+            elif getattr(self.app, "original_np", None) is not None:
+                montage_path = os.path.join(EXE_DIR, "temp_diag_pdf_fig.jpg")
+                arr_norm = np.clip(self.app.original_np, 0.0, 1.0)
+                u8_img = (arr_norm * 255.0).astype(np.uint8)
+                cv2.imwrite(montage_path, u8_img)
+            elif getattr(self.app, "ct_slices", None) and len(self.app.ct_slices) > 0:
+                montage_path = os.path.join(EXE_DIR, "temp_diag_pdf_fig.jpg")
+                mid_s = self.app.ct_slices[len(self.app.ct_slices) // 2]
+                arr_norm = np.clip(mid_s, 0.0, 1.0)
+                u8_img = (arr_norm * 255.0).astype(np.uint8)
+                cv2.imwrite(montage_path, u8_img)
 
             gen.generate_report(fn, p_info, rep_type, findings, montage_path, impr, pacs, recs)
             self.status_lbl.config(text="✓ گزارش رسمی PDF با موفقیت صادر شد", fg="#34d399")
@@ -629,8 +642,18 @@ class ClinicalReportModal(tk.Toplevel):
         age_val = self.p_age_var.get() or "---"
 
         t_type = self.report_type.get()
-        study_title_en = "Bilateral Digital Mammography (4-View)" if t_type == "mammo" else ("Chest Radiography (PA View)" if t_type == "chest" else "Musculoskeletal Radiography")
-        study_title_fa = "ماموگرافی جامع ۴ نمایه" if t_type == "mammo" else ("رادیوگرافی قفسه سینه" if t_type == "chest" else "رادیوگرافی استخوان و ارتوپدی")
+        if t_type == "mammo":
+            study_title_en = "Bilateral Digital Mammography (4-View)"
+            study_title_fa = "ماموگرافی جامع ۴ نمایه"
+        elif t_type in ("ct", "ct3d", "ct_3d"):
+            study_title_en = "Multi-Detector Computed Tomography (MDCT 3D)"
+            study_title_fa = "سی‌تی اسکن مولتی‌دیتکتور و بازسازی سه‌بعدی"
+        elif t_type == "chest":
+            study_title_en = "Chest Radiography (PA View)"
+            study_title_fa = "رادیوگرافی قفسه سینه"
+        else:
+            study_title_en = "Musculoskeletal Radiography"
+            study_title_fa = "رادیوگرافی استخوان و ارتوپدی"
 
         p_l = c_l.paragraphs[0]
         p_l.alignment = WD_ALIGN_PARAGRAPH.LEFT
@@ -2103,12 +2126,10 @@ class MedalPacsModal(tk.Toplevel):
                                 parent=self)
             self.destroy()
         elif mod == "ct3d":
-            ct_folder = os.path.dirname(dicom_files[0]) if dicom_files else ""
+            ct_folder = res.get("extract_folder") or (os.path.dirname(dicom_files[0]) if dicom_files else "")
             self.destroy()
-            # 1. Load into main workstation viewer
-            self.app.load_ct_series_to_app(ct_folder, dicom_files, pname=pname, pid=pid)
-            # 2. Open 3D CT Reconstruction Studio with pre-loaded series
-            self.app.open_3d_ct_studio(folder=ct_folder)
+            # Load into main workstation viewer and auto-open 3D CT studio
+            self.app.load_ct_series_to_app(ct_folder, dicom_files, pname=pname, pid=pid, auto_open_studio=True)
             messagebox.showinfo("اتمام دریافت سی‌تی اسکن از پکس",
                                 f"مقاطع سی‌تی اسکن بیمار ({len(dicom_files)} مقطع دایکام) با موفقیت از پکس ({connected_base}) دریافت و در محیط اصلی نرم‌افزار و استودیوی سه‌بعدی بارگذاری گردید:\n\n"
                                 f"نام بیمار: {pname}\nشناسه: {pid}\nتعداد مقاطع: {len(dicom_files)}\nپوشه ذخیره: {ct_folder}")
@@ -2292,32 +2313,48 @@ class Boali3DReconstructor:
         self.pixel_spacing = 0.5
 
     def load_series_from_folder(self, folder_path, slice_thickness=1.25, progress_callback=None):
-        """Loads a stack of CT image files (.jpg, .png, or .dcm) and constructs an isotropic 3D volume."""
+        """Loads a stack of CT image files (.dcm or image formats) recursively and constructs an isotropic 3D volume."""
         if not os.path.isdir(folder_path):
             raise FileNotFoundError(f"Folder not found: {folder_path}")
 
-        files = sorted([f for f in os.listdir(folder_path) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.dcm', '.tif'))])
-        if not files:
-            raise ValueError(f"No supported CT image slices found in {folder_path}")
+        # Recursively search all subdirectories
+        all_candidate_files = []
+        for root, _, files in os.walk(folder_path):
+            for f in sorted(files):
+                fl = f.lower()
+                if fl in ["dicomdir", "thumbs.db", "desktop.ini"] or fl.endswith((".xml", ".txt", ".json", ".zip", ".html", ".exe", ".dll", ".log", ".bat")):
+                    continue
+                fp = os.path.join(root, f)
+                if os.path.isfile(fp) and os.path.getsize(fp) > 512:
+                    all_candidate_files.append(fp)
+
+        if not all_candidate_files:
+            raise ValueError(f"هیچ مقطع تصویری یا دایکام در پوشه {folder_path} یافت نشد.")
 
         self.slice_thickness = slice_thickness
-        total_files = len(files)
-        slices = []
+        total_files = len(all_candidate_files)
+        slices_with_order = []
 
-        for idx, f in enumerate(files):
-            file_path = os.path.join(folder_path, f)
-            img = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
-            if img is None:
+        for idx, file_path in enumerate(all_candidate_files):
+            img = None
+            sort_key = idx
+            if pydicom is not None:
                 try:
-                    import pydicom
-                    ds = pydicom.dcmread(file_path)
-                    img = ds.pixel_array.astype(np.float32)
-                    if hasattr(ds, 'RescaleSlope') and hasattr(ds, 'RescaleIntercept'):
-                        img = img * ds.RescaleSlope + ds.RescaleIntercept
-                    img = np.clip(img, -1000, 1000)
-                    img = ((img + 1000) / 2000.0 * 255.0).astype(np.uint8)
+                    ds = pydicom.dcmread(file_path, force=True)
+                    if hasattr(ds, 'pixel_array'):
+                        raw = ds.pixel_array.astype(np.float32)
+                        if hasattr(ds, 'RescaleSlope') and hasattr(ds, 'RescaleIntercept'):
+                            raw = raw * float(ds.RescaleSlope) + float(ds.RescaleIntercept)
+                            raw = np.clip(raw, -1000, 1000)
+                            img = ((raw + 1000.0) / 2000.0 * 255.0).astype(np.uint8)
+                        else:
+                            img = ((raw - raw.min()) / (raw.max() - raw.min() + 1e-8) * 255.0).astype(np.uint8)
+                        sort_key = float(getattr(ds, 'SliceLocation', getattr(ds, 'InstanceNumber', idx)))
                 except Exception:
-                    continue
+                    pass
+
+            if img is None and cv2 is not None:
+                img = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
 
             if img is not None:
                 if (img.shape[1], img.shape[0]) != self.target_res:
@@ -2332,13 +2369,16 @@ class Boali3DReconstructor:
                 h, w = img.shape
                 img[int(h*0.82):, int(w*0.82):] = 0
 
-                slices.append(img)
+                slices_with_order.append((sort_key, img))
 
-            if progress_callback and idx % 5 == 0:
+            if progress_callback and idx % 10 == 0:
                 progress_callback(int((idx / total_files) * 30), f"بارگذاری مقطع {idx+1} از {total_files}...")
 
-        if len(slices) < 5:
-            raise ValueError("At least 5 consecutive CT slices required for 3D reconstruction.")
+        if len(slices_with_order) < 5:
+            raise ValueError(f"حداقل ۵ مقطع پیوسته سی‌تی اسکن برای بازسازی سه‌بعدی مورد نیاز است (تعداد یافت‌شده: {len(slices_with_order)}).")
+
+        slices_with_order.sort(key=lambda item: item[0])
+        slices = [item[1] for item in slices_with_order]
 
         self.volume = np.stack(slices, axis=0).astype(np.float32)
 
@@ -2358,6 +2398,45 @@ class Boali3DReconstructor:
         self.volume_iso = np.transpose(vol_resized_t, (1, 0, 2))
 
         # Smart Table / Scanner Bed Removal
+        self._remove_scanner_couch()
+
+        if progress_callback:
+            progress_callback(50, "حذف خودکار تخت معاینه و تفکیک بافت‌ها...")
+
+        return self.volume_iso.shape
+
+    def load_series_from_slices(self, slices_list, slice_thickness=1.25, progress_callback=None):
+        """Builds isotropic 3D volume directly from preloaded numpy slices (instant zero-disk lag)."""
+        self.slice_thickness = slice_thickness
+        processed = []
+        for idx, s in enumerate(slices_list):
+            img = s
+            if img.dtype != np.uint8:
+                img = (np.clip(img, 0.0, 1.0) * 255.0).astype(np.uint8)
+            if (img.shape[1], img.shape[0]) != self.target_res:
+                img = cv2.resize(img, self.target_res, interpolation=cv2.INTER_AREA)
+            img[:10, :] = 0
+            img[-12:, :] = 0
+            img[:, :10] = 0
+            img[:, -12:] = 0
+            h, w = img.shape
+            img[int(h*0.82):, int(w*0.82):] = 0
+            processed.append(img)
+
+        self.volume = np.stack(processed, axis=0).astype(np.float32)
+
+        z_dim = self.volume.shape[0]
+        z_ratio = max(1.0, (self.slice_thickness / self.pixel_spacing))
+        target_z = min(int(z_dim * z_ratio), 180)
+
+        if progress_callback:
+            progress_callback(40, "درون‌یابی ایزوتروپیک سه‌بعدی وکسل‌ها (Isotropic Resampling)...")
+
+        vol_t = np.transpose(self.volume, (1, 0, 2))
+        vol_resized_t = np.empty((self.volume.shape[1], target_z, self.volume.shape[2]), dtype=np.float32)
+        for y in range(self.volume.shape[1]):
+            vol_resized_t[y] = cv2.resize(vol_t[y], (self.volume.shape[2], target_z), interpolation=cv2.INTER_LINEAR)
+        self.volume_iso = np.transpose(vol_resized_t, (1, 0, 2))
         self._remove_scanner_couch()
 
         if progress_callback:
@@ -2808,6 +2887,25 @@ class Boali3DCTStudioDialog(tk.Toplevel):
         d = filedialog.askdirectory(title="انتخاب پوشه مقاطع سی‌تی اسکن")
         if d:
             self.folder_var.set(d)
+            self._scan_and_update_folder(d)
+
+    def _scan_and_update_folder(self, d):
+        candidates = []
+        for root, _, files in os.walk(d):
+            for f in sorted(files):
+                fl = f.lower()
+                if fl in ["dicomdir", "thumbs.db", "desktop.ini"] or fl.endswith((".xml", ".txt", ".json", ".zip", ".html", ".exe", ".dll", ".log", ".bat")):
+                    continue
+                fp = os.path.join(root, f)
+                if os.path.isfile(fp) and os.path.getsize(fp) > 512:
+                    candidates.append(fp)
+        if candidates:
+            self.lbl_status.config(text=f"✓ تعداد {len(candidates)} مقطع معتبر سی‌تی در پوشه شناسایی شد.")
+            if hasattr(self.master, "load_ct_series_to_app"):
+                self.master.load_ct_series_to_app(d, files=candidates, auto_open_studio=False)
+            self.btn_run.config(state=tk.NORMAL, bg=C_BLUE)
+        else:
+            self.lbl_status.config(text="⚠️ هیچ مقطع معتبر سی‌تی اسکن در این پوشه یافت نشد.")
 
     def _on_preset_change(self, event=None):
         val = self.preset_var.get()
@@ -2822,15 +2920,17 @@ class Boali3DCTStudioDialog(tk.Toplevel):
         if self.is_processing:
             return
         folder = self.folder_var.get().strip()
-        if not folder or not os.path.exists(folder):
-            messagebox.showwarning("خطا", "لطفاً ابتدا یک پوشه معتبر حاوی مقاطع سی‌تی اسکن را انتخاب کنید.")
+        master_slices = getattr(self.master, "ct_slices", None)
+        if (not folder or not os.path.exists(folder)) and (not master_slices or len(master_slices) < 5):
+            messagebox.showwarning("خطا", "لطفاً ابتدا یک پوشه معتبر حاوی مقاطع سی‌تی اسکن را انتخاب فرمایید.")
             return
 
         self.is_processing = True
         self.btn_run.config(state=tk.DISABLED, bg=C_BORDER)
         self.progress_bar["value"] = 5
-        self.lbl_status.config(text="در حال بارگذاری مقاطع سی‌تی اسکن...")
+        self.lbl_status.config(text="در حال آماده‌سازی و بازسازی سه‌بعدی...")
 
+        import threading
         threading.Thread(target=self._run_reconstruction, daemon=True).start()
 
     def _run_reconstruction(self):
@@ -2840,16 +2940,24 @@ class Boali3DCTStudioDialog(tk.Toplevel):
             preset_key = val.split(" - ")[0].strip()
             num_frames = self.frames_var.get()
             th = self.threshold_var.get()
-            PRESETS[preset_key]["hu_threshold"] = th
+            if preset_key in PRESETS:
+                PRESETS[preset_key]["hu_threshold"] = th
 
             def progress_cb(pct, msg):
                 self.after(0, lambda: self._update_progress(pct, msg))
 
-            # 1. Load slices & resample
-            self.engine.load_series_from_folder(folder, slice_thickness=1.25, progress_callback=progress_cb)
+            # 1. Load slices & resample (favor in-memory slices if available)
+            master_slices = getattr(self.master, "ct_slices", None)
+            master_folder = getattr(self.master, "ct_series_folder", "")
+            if master_slices and len(master_slices) >= 5 and (folder == master_folder or not folder):
+                progress_cb(15, f"استفاده از {len(master_slices)} مقطع آماده در حافظه...")
+                self.engine.load_series_from_slices(master_slices, slice_thickness=1.25, progress_callback=progress_cb)
+            else:
+                self.engine.load_series_from_folder(folder, slice_thickness=1.25, progress_callback=progress_cb)
 
             # 2. Render 360 degree cine
-            out_cine_dir = os.path.join(folder, "Boali_3D_Cine_Series")
+            target_out = folder if (folder and os.path.exists(folder)) else EXE_DIR
+            out_cine_dir = os.path.join(target_out, "Boali_3D_Cine_Series")
             frame_paths = self.engine.generate_full_360_cine(out_cine_dir, num_frames=num_frames,
                                                             preset_key=preset_key, progress_callback=progress_cb)
 
@@ -2857,6 +2965,8 @@ class Boali3DCTStudioDialog(tk.Toplevel):
 
             self.after(0, self._on_reconstruction_done)
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             err_msg = str(e)
             self.after(0, lambda: self._on_reconstruction_error(err_msg))
 
@@ -3590,6 +3700,52 @@ class BoneSuppressionApp(tk.Tk):
                                 command=self.open_pacs_modal)
         btn_pacs_ct.pack(fill=tk.X, pady=(2, 4))
 
+        btn_open_folder = tk.Button(head_box, text="📂 انتخاب پوشه محلی مقاطع سی‌تی اسکن", font=("Segoe UI", 8),
+                                    bg="#1e293b", fg=C_TEXT_LIGHT, activebackground="#334155", relief=tk.FLAT, pady=4, cursor="hand2",
+                                    command=self.open_ct_folder)
+        btn_open_folder.pack(fill=tk.X, pady=(2, 4))
+
+        # Active CT Slice Controller Card
+        if getattr(self, "ct_slices", None) and len(self.ct_slices) > 0:
+            slice_box = tk.LabelFrame(self.sb_body, text=f" ناوبری مقاطع سی‌تی اسکن ({len(self.ct_slices)} مقطع) ",
+                                      font=("Segoe UI", 8, "bold"), fg="#38bdf8", bg=C_CARD, bd=1, relief=tk.SOLID, labelanchor="ne")
+            slice_box.pack(fill=tk.X, pady=4, padx=2)
+
+            cur_idx = getattr(self, "ct_slice_idx", 0)
+            lbl_slice_info = tk.Label(slice_box, text=f"مقطع فعلی: {cur_idx + 1} از {len(self.ct_slices)}",
+                                      font=("Segoe UI", 9, "bold"), fg=C_TEXT_LIGHT, bg=C_CARD)
+            lbl_slice_info.pack(pady=(4, 2))
+
+            def _on_ct_slider_change(val):
+                idx = int(float(val))
+                if 0 <= idx < len(self.ct_slices):
+                    self.ct_slice_idx = idx
+                    self.original_np = self.ct_slices[idx]
+                    lbl_slice_info.config(text=f"مقطع فعلی: {idx + 1} از {len(self.ct_slices)}")
+                    self.render_view()
+
+            ct_scale = ttk.Scale(slice_box, from_=0, to=len(self.ct_slices)-1, orient=tk.HORIZONTAL,
+                                 command=_on_ct_slider_change)
+            ct_scale.set(cur_idx)
+            ct_scale.pack(fill=tk.X, padx=8, pady=(2, 6))
+
+            btn_nav_row = tk.Frame(slice_box, bg=C_CARD)
+            btn_nav_row.pack(fill=tk.X, padx=8, pady=(0, 6))
+
+            def _step_slice(delta):
+                new_idx = max(0, min(len(self.ct_slices) - 1, self.ct_slice_idx + delta))
+                ct_scale.set(new_idx)
+                _on_ct_slider_change(new_idx)
+
+            tk.Button(btn_nav_row, text="◀◀ -10", font=("Segoe UI", 8), bg="#1e293b", fg=C_TEXT_LIGHT,
+                      relief=tk.FLAT, padx=4, pady=2, command=lambda: _step_slice(-10)).pack(side=tk.LEFT, padx=1)
+            tk.Button(btn_nav_row, text="◀ -1", font=("Segoe UI", 8), bg="#1e293b", fg=C_TEXT_LIGHT,
+                      relief=tk.FLAT, padx=4, pady=2, command=lambda: _step_slice(-1)).pack(side=tk.LEFT, padx=1)
+            tk.Button(btn_nav_row, text="+1 ▶", font=("Segoe UI", 8), bg="#1e293b", fg=C_TEXT_LIGHT,
+                      relief=tk.FLAT, padx=4, pady=2, command=lambda: _step_slice(1)).pack(side=tk.RIGHT, padx=1)
+            tk.Button(btn_nav_row, text="+10 ▶▶", font=("Segoe UI", 8), bg="#1e293b", fg=C_TEXT_LIGHT,
+                      relief=tk.FLAT, padx=4, pady=2, command=lambda: _step_slice(10)).pack(side=tk.RIGHT, padx=1)
+
         # Presets Summary Card
         p_card = tk.LabelFrame(self.sb_body, text=" پریست‌های آناتومیک آماده (Presets) ", font=("Segoe UI", 8, "bold"),
                                fg=C_CYAN, bg=C_CARD, bd=1, relief=tk.SOLID, labelanchor="ne")
@@ -4242,42 +4398,88 @@ class BoneSuppressionApp(tk.Tk):
         except Exception as e:
             messagebox.showerror("خطا در باز کردن تصویر", f"خواندن تصویر با خطا مواجه شد:\n{e}")
 
+    def open_ct_folder(self):
+        d = filedialog.askdirectory(title="انتخاب پوشه مقاطع سی‌تی اسکن (DICOM Series)")
+        if d:
+            self.load_ct_series_to_app(d, auto_open_studio=True)
+
     def read_image(self, path):
         meta = {}
-        if path.lower().endswith((".dcm", ".dicom")) and pydicom is not None:
-            ds = pydicom.dcmread(path)
-            meta["patient_name"] = str(getattr(ds, "PatientName", "")).strip()
-            meta["patient_id"] = str(getattr(ds, "PatientID", "")).strip()
-            meta["study_date"] = str(getattr(ds, "StudyDate", "")).strip()
-            meta["patient_age"] = str(getattr(ds, "PatientAge", "")).strip()
-            meta["view_position"] = str(getattr(ds, "ViewPosition", "")).strip().upper()
-            meta["image_laterality"] = str(getattr(ds, "ImageLaterality", getattr(ds, "Laterality", ""))).strip().upper()
-            arr = ds.pixel_array.astype(np.float32)
-            if getattr(ds, "PhotometricInterpretation", "") == "MONOCHROME1":
-                arr = arr.max() - arr
-            arr = (arr - arr.min()) / (arr.max() - arr.min() + 1e-8)
-            return arr, meta
+        # 1. Try reading as DICOM first (universal detection regardless of file extension)
+        if pydicom is not None:
+            try:
+                ds = pydicom.dcmread(path, force=True)
+                if hasattr(ds, "pixel_array"):
+                    meta["patient_name"] = str(getattr(ds, "PatientName", "")).strip()
+                    meta["patient_id"] = str(getattr(ds, "PatientID", "")).strip()
+                    meta["study_date"] = str(getattr(ds, "StudyDate", "")).strip()
+                    meta["patient_age"] = str(getattr(ds, "PatientAge", "")).strip()
+                    meta["view_position"] = str(getattr(ds, "ViewPosition", "")).strip().upper()
+                    meta["image_laterality"] = str(getattr(ds, "ImageLaterality", getattr(ds, "Laterality", ""))).strip().upper()
+                    meta["slice_location"] = float(getattr(ds, "SliceLocation", getattr(ds, "InstanceNumber", 0)))
+                    meta["instance_number"] = int(getattr(ds, "InstanceNumber", 0))
+                    meta["series_number"] = str(getattr(ds, "SeriesNumber", "1")).strip()
+                    meta["slice_thickness"] = float(getattr(ds, "SliceThickness", 1.25))
+                    meta["modality"] = str(getattr(ds, "Modality", "")).strip().upper()
+
+                    arr = ds.pixel_array.astype(np.float32)
+                    # Check for Rescale Slope / Intercept (standard for CT Hounsfield Units)
+                    if hasattr(ds, "RescaleSlope") and hasattr(ds, "RescaleIntercept"):
+                        arr = arr * float(ds.RescaleSlope) + float(ds.RescaleIntercept)
+                        wc = getattr(ds, "WindowCenter", 40)
+                        ww = getattr(ds, "WindowWidth", 400)
+                        if isinstance(wc, (list, tuple)):
+                            wc = float(wc[0])
+                        else:
+                            try:
+                                wc = float(wc)
+                            except Exception:
+                                wc = 40.0
+                        if isinstance(ww, (list, tuple)):
+                            ww = float(ww[0])
+                        else:
+                            try:
+                                ww = float(ww)
+                            except Exception:
+                                ww = 400.0
+                        if ww <= 0:
+                            ww = 400.0
+                        lo = wc - 0.5 - (ww - 1.0) / 2.0
+                        hi = wc - 0.5 + (ww - 1.0) / 2.0
+                        arr = np.clip(arr, lo, hi)
+                        arr = (arr - lo) / (hi - lo + 1e-8)
+                    else:
+                        if getattr(ds, "PhotometricInterpretation", "") == "MONOCHROME1":
+                            arr = arr.max() - arr
+                        arr = (arr - arr.min()) / (arr.max() - arr.min() + 1e-8)
+                    return arr, meta
+            except Exception:
+                pass
 
         if cv2 is not None:
             bgr = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
-            if bgr is None:
-                raise ValueError("cv2 قادر به خواندن این فایل نیست.")
-            h, w = bgr.shape
-            if max(h, w) > 2800:
-                sc = 2800.0 / float(max(h, w))
-                bgr = cv2.resize(bgr, (int(w * sc), int(h * sc)), interpolation=cv2.INTER_AREA)
-            arr = bgr.astype(np.float32) / 255.0
-        else:
+            if bgr is not None:
+                h, w = bgr.shape
+                if max(h, w) > 2800:
+                    sc = 2800.0 / float(max(h, w))
+                    bgr = cv2.resize(bgr, (int(w * sc), int(h * sc)), interpolation=cv2.INTER_AREA)
+                arr = bgr.astype(np.float32) / 255.0
+                if self.auto_invert_var.get() and self.looks_inverted(arr):
+                    arr = 1.0 - arr
+                return arr, meta
+
+        try:
             p = Image.open(path).convert("L")
             w, h = p.size
             if max(h, w) > 2800:
                 sc = 2800.0 / float(max(h, w))
                 p = p.resize((int(w * sc), int(h * sc)), Image.Resampling.BILINEAR)
             arr = np.array(p, dtype=np.float32) / 255.0
-
-        if self.auto_invert_var.get() and self.looks_inverted(arr):
-            arr = 1.0 - arr
-        return arr, meta
+            if self.auto_invert_var.get() and self.looks_inverted(arr):
+                arr = 1.0 - arr
+            return arr, meta
+        except Exception:
+            raise ValueError(f"قادر به خواندن فایل تصویری نیست: {path}")
 
     def update_patient_meta(self, meta):
         if not meta:
@@ -4645,41 +4847,66 @@ class BoneSuppressionApp(tk.Tk):
     def open_pacs_modal(self):
         MedalPacsModal(self, pacs_client=self.pacs_client)
 
-    def load_ct_series_to_app(self, folder, files=None, pname="", pid=""):
-        """Loads complete CT slice series into main desktop viewer for slice-by-slice navigation."""
-        if not files and os.path.isdir(folder):
-            files = sorted([os.path.join(folder, f) for f in os.listdir(folder)
-                            if f.lower().endswith(('.dcm', '.jpg', '.jpeg', '.png', '.tif'))])
-        if not files:
+    def load_ct_series_to_app(self, folder, files=None, pname="", pid="", auto_open_studio=True):
+        """Loads complete CT slice series into main desktop viewer for slice-by-slice navigation,
+        matching the mammography multi-series loading pattern."""
+        candidate_files = []
+        if files:
+            candidate_files = list(files)
+        elif folder and os.path.isdir(folder):
+            for root, _, fnames in os.walk(folder):
+                for fn in sorted(fnames):
+                    fl = fn.lower()
+                    if fl in ["dicomdir", "thumbs.db", "desktop.ini"] or fl.endswith((".xml", ".txt", ".json", ".zip", ".html", ".exe", ".dll", ".log", ".bat")):
+                        continue
+                    fp = os.path.join(root, fn)
+                    if os.path.isfile(fp) and os.path.getsize(fp) > 512:
+                        candidate_files.append(fp)
+
+        if not candidate_files:
             return
 
-        self.ct_series_folder = folder
-        self.ct_slices = []
-        self.ct_slice_meta = []
+        self.ct_series_folder = folder or os.path.dirname(candidate_files[0])
+        slices_with_order = []
 
         if pname and not self.patient_info.get("name"):
             self.patient_info["name"] = pname.replace("^", " ").replace("_", " ")
         if pid and not self.patient_info.get("id"):
             self.patient_info["id"] = pid
 
-        for f in files:
+        for idx, f in enumerate(candidate_files):
             try:
                 arr, meta = self.read_image(f)
                 if arr is not None:
-                    self.ct_slices.append(arr)
-                    self.ct_slice_meta.append(meta)
+                    sort_k = float(meta.get("slice_location", meta.get("instance_number", idx)))
+                    slices_with_order.append((sort_k, arr, meta, f))
                     if not self.patient_info.get("name") and meta.get("patient_name"):
                         self.update_patient_meta(meta)
             except Exception:
                 continue
 
-        if self.ct_slices:
-            self.ct_slice_idx = len(self.ct_slices) // 2 # Center slice
-            self.original_np = self.ct_slices[self.ct_slice_idx]
-            self.active_ai_module.set("ct3d")
-            self.refresh_sidebar_ui()
-            self.render_view()
-            self.status_label.config(text=f"✓ سری سی‌تی اسکن ({len(self.ct_slices)} مقطع) برای {self.patient_info.get('name', '')} در نرم‌افزار بارگذاری شد.")
+        if not slices_with_order:
+            return
+
+        # Sort slices anatomically (superior to inferior or by slice location)
+        slices_with_order.sort(key=lambda item: item[0])
+
+        self.ct_slices = [item[1] for item in slices_with_order]
+        self.ct_slice_meta = [item[2] for item in slices_with_order]
+        self.ct_slice_files = [item[3] for item in slices_with_order]
+
+        self.ct_slice_idx = len(self.ct_slices) // 2 # Center slice
+        self.original_np = self.ct_slices[self.ct_slice_idx]
+        self.active_ai_module.set("ct3d")
+        self.refresh_sidebar_ui()
+        self.render_view()
+
+        p_display = self.patient_info.get('name') or pname or 'بیمار بالینی'
+        self.status_label.config(text=f"✓ سری سی‌تی اسکن ({len(self.ct_slices)} مقطع محوری) برای {p_display} در نرم‌افزار بارگذاری شد.")
+
+        # Replicate mammography pattern + user preference: auto-open 3D CT studio
+        if auto_open_studio:
+            self.after(300, lambda: self.open_3d_ct_studio(folder=self.ct_series_folder))
 
     def load_dicom_files_to_mammo(self, files, pname="", pid=""):
         if not files:

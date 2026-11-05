@@ -120,7 +120,9 @@ class BoaliPDFReportGenerator:
 
         # Titles based on modality
         titles = {
-            "ct_3d": ("گزارش فوق‌تخصصی سی‌تی اسکن مولتی‌دیتکتور (MDCT 3D Reconstructions)", "Right Ankle / Extremity MDCT"),
+            "ct_3d": ("گزارش فوق‌تخصصی سی‌تی اسکن مولتی‌دیتکتور (MDCT 3D Reconstructions)", "Computed Tomography MDCT 3D"),
+            "ct3d": ("گزارش فوق‌تخصصی سی‌تی اسکن مولتی‌دیتکتور (MDCT 3D Reconstructions)", "Computed Tomography MDCT 3D"),
+            "ct": ("گزارش فوق‌تخصصی سی‌تی اسکن مولتی‌دیتکتور (MDCT 3D Reconstructions)", "Computed Tomography MDCT 3D"),
             "mammo": ("گزارش فوق‌تخصصی ماموگرافی دیجیتال ۴ نمایه (Bilateral FFDM & BI-RADS)", "Bilateral Mammography (4-View)"),
             "chest": ("گزارش تخصصی رادیوگرافی قفسه سینه و غربالگری ۱۸ بیماری (Chest Radiography)", "Chest X-Ray PA & Bone Suppression"),
             "ortho": ("گزارش تخصصی رادیوگرافی اسکلتی و کشف شکستگی (Musculoskeletal Trauma)", "Extremity X-Ray & Fracture Detection")

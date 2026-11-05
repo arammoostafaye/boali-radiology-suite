@@ -330,6 +330,25 @@ class Boali3DCTStudioDialog(tk.Toplevel):
         d = filedialog.askdirectory(title="انتخاب پوشه مقاطع سی‌تی اسکن")
         if d:
             self.folder_var.set(d)
+            self._scan_and_update_folder(d)
+
+    def _scan_and_update_folder(self, d):
+        candidates = []
+        for root, _, files in os.walk(d):
+            for f in sorted(files):
+                fl = f.lower()
+                if fl in ["dicomdir", "thumbs.db", "desktop.ini"] or fl.endswith((".xml", ".txt", ".json", ".zip", ".html", ".exe", ".dll", ".log", ".bat")):
+                    continue
+                fp = os.path.join(root, f)
+                if os.path.isfile(fp) and os.path.getsize(fp) > 512:
+                    candidates.append(fp)
+        if candidates:
+            self.lbl_status.config(text=f"✓ تعداد {len(candidates)} مقطع معتبر سی‌تی در پوشه شناسایی شد.")
+            if hasattr(self.master, "load_ct_series_to_app"):
+                self.master.load_ct_series_to_app(d, files=candidates, auto_open_studio=False)
+            self.btn_run.config(state=tk.NORMAL, bg=C_BLUE)
+        else:
+            self.lbl_status.config(text="⚠️ هیچ مقطع معتبر سی‌تی اسکن در این پوشه یافت نشد.")
 
     def _on_preset_change(self, event=None):
         val = self.preset_var.get()
@@ -344,15 +363,17 @@ class Boali3DCTStudioDialog(tk.Toplevel):
         if self.is_processing:
             return
         folder = self.folder_var.get().strip()
-        if not folder or not os.path.exists(folder):
-            messagebox.showwarning("خطا", "لطفاً ابتدا یک پوشه معتبر حاوی مقاطع سی‌تی اسکن را انتخاب کنید.")
+        master_slices = getattr(self.master, "ct_slices", None)
+        if (not folder or not os.path.exists(folder)) and (not master_slices or len(master_slices) < 5):
+            messagebox.showwarning("خطا", "لطفاً ابتدا یک پوشه معتبر حاوی مقاطع سی‌تی اسکن را انتخاب فرمایید.")
             return
 
         self.is_processing = True
         self.btn_run.config(state=tk.DISABLED, bg=C_BORDER)
         self.progress_bar["value"] = 5
-        self.lbl_status.config(text="در حال بارگذاری مقاطع سی‌تی اسکن...")
+        self.lbl_status.config(text="در حال آماده‌سازی و بازسازی سه‌بعدی...")
 
+        import threading
         threading.Thread(target=self._run_reconstruction, daemon=True).start()
 
     def _run_reconstruction(self):
@@ -362,16 +383,24 @@ class Boali3DCTStudioDialog(tk.Toplevel):
             preset_key = val.split(" - ")[0].strip()
             num_frames = self.frames_var.get()
             th = self.threshold_var.get()
-            PRESETS[preset_key]["hu_threshold"] = th
+            if preset_key in PRESETS:
+                PRESETS[preset_key]["hu_threshold"] = th
 
             def progress_cb(pct, msg):
                 self.after(0, lambda: self._update_progress(pct, msg))
 
-            # 1. Load slices & resample
-            self.engine.load_series_from_folder(folder, slice_thickness=1.25, progress_callback=progress_cb)
+            # 1. Load slices & resample (favor in-memory slices if available)
+            master_slices = getattr(self.master, "ct_slices", None)
+            master_folder = getattr(self.master, "ct_series_folder", "")
+            if master_slices and len(master_slices) >= 5 and (folder == master_folder or not folder):
+                progress_cb(15, f"استفاده از {len(master_slices)} مقطع آماده در حافظه...")
+                self.engine.load_series_from_slices(master_slices, slice_thickness=1.25, progress_callback=progress_cb)
+            else:
+                self.engine.load_series_from_folder(folder, slice_thickness=1.25, progress_callback=progress_cb)
 
             # 2. Render 360 degree cine
-            out_cine_dir = os.path.join(folder, "Boali_3D_Cine_Series")
+            target_out = folder if (folder and os.path.exists(folder)) else os.path.abspath(os.path.dirname(__file__))
+            out_cine_dir = os.path.join(target_out, "Boali_3D_Cine_Series")
             frame_paths = self.engine.generate_full_360_cine(out_cine_dir, num_frames=num_frames,
                                                             preset_key=preset_key, progress_callback=progress_cb)
 
@@ -379,6 +408,8 @@ class Boali3DCTStudioDialog(tk.Toplevel):
 
             self.after(0, self._on_reconstruction_done)
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             err_msg = str(e)
             self.after(0, lambda: self._on_reconstruction_error(err_msg))
 

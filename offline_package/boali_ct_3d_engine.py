@@ -118,32 +118,48 @@ class Boali3DReconstructor:
         self.pixel_spacing = 0.5
 
     def load_series_from_folder(self, folder_path, slice_thickness=1.25, progress_callback=None):
-        """Loads a stack of CT image files (.jpg, .png, or .dcm) and constructs an isotropic 3D volume."""
+        """Loads a stack of CT image files (.dcm or image formats) recursively and constructs an isotropic 3D volume."""
         if not os.path.isdir(folder_path):
             raise FileNotFoundError(f"Folder not found: {folder_path}")
 
-        files = sorted([f for f in os.listdir(folder_path) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.dcm', '.tif'))])
-        if not files:
-            raise ValueError(f"No supported CT image slices found in {folder_path}")
+        # Recursively search all subdirectories
+        all_candidate_files = []
+        for root, _, files in os.walk(folder_path):
+            for f in sorted(files):
+                fl = f.lower()
+                if fl in ["dicomdir", "thumbs.db", "desktop.ini"] or fl.endswith((".xml", ".txt", ".json", ".zip", ".html", ".exe", ".dll", ".log", ".bat")):
+                    continue
+                fp = os.path.join(root, f)
+                if os.path.isfile(fp) and os.path.getsize(fp) > 512:
+                    all_candidate_files.append(fp)
+
+        if not all_candidate_files:
+            raise ValueError(f"هیچ مقطع تصویری یا دایکام در پوشه {folder_path} یافت نشد.")
 
         self.slice_thickness = slice_thickness
-        total_files = len(files)
-        slices = []
+        total_files = len(all_candidate_files)
+        slices_with_order = []
 
-        for idx, f in enumerate(files):
-            file_path = os.path.join(folder_path, f)
-            img = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
-            if img is None:
-                try:
-                    import pydicom
-                    ds = pydicom.dcmread(file_path)
-                    img = ds.pixel_array.astype(np.float32)
+        for idx, file_path in enumerate(all_candidate_files):
+            img = None
+            sort_key = idx
+            try:
+                import pydicom
+                ds = pydicom.dcmread(file_path, force=True)
+                if hasattr(ds, 'pixel_array'):
+                    raw = ds.pixel_array.astype(np.float32)
                     if hasattr(ds, 'RescaleSlope') and hasattr(ds, 'RescaleIntercept'):
-                        img = img * ds.RescaleSlope + ds.RescaleIntercept
-                    img = np.clip(img, -1000, 1000)
-                    img = ((img + 1000) / 2000.0 * 255.0).astype(np.uint8)
-                except Exception:
-                    continue
+                        raw = raw * float(ds.RescaleSlope) + float(ds.RescaleIntercept)
+                        raw = np.clip(raw, -1000, 1000)
+                        img = ((raw + 1000.0) / 2000.0 * 255.0).astype(np.uint8)
+                    else:
+                        img = ((raw - raw.min()) / (raw.max() - raw.min() + 1e-8) * 255.0).astype(np.uint8)
+                    sort_key = float(getattr(ds, 'SliceLocation', getattr(ds, 'InstanceNumber', idx)))
+            except Exception:
+                pass
+
+            if img is None and cv2 is not None:
+                img = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
 
             if img is not None:
                 if (img.shape[1], img.shape[0]) != self.target_res:
@@ -158,13 +174,16 @@ class Boali3DReconstructor:
                 h, w = img.shape
                 img[int(h*0.82):, int(w*0.82):] = 0
 
-                slices.append(img)
+                slices_with_order.append((sort_key, img))
 
-            if progress_callback and idx % 5 == 0:
+            if progress_callback and idx % 10 == 0:
                 progress_callback(int((idx / total_files) * 30), f"بارگذاری مقطع {idx+1} از {total_files}...")
 
-        if len(slices) < 5:
-            raise ValueError("At least 5 consecutive CT slices required for 3D reconstruction.")
+        if len(slices_with_order) < 5:
+            raise ValueError(f"حداقل ۵ مقطع پیوسته سی‌تی اسکن برای بازسازی سه‌بعدی مورد نیاز است (تعداد یافت‌شده: {len(slices_with_order)}).")
+
+        slices_with_order.sort(key=lambda item: item[0])
+        slices = [item[1] for item in slices_with_order]
 
         self.volume = np.stack(slices, axis=0).astype(np.float32)
 
@@ -176,7 +195,6 @@ class Boali3DReconstructor:
         if progress_callback:
             progress_callback(40, "درون‌یابی ایزوتروپیک سه‌بعدی وکسل‌ها (Isotropic Resampling)...")
 
-        # Volume is (Z, Y, X). Transpose to (Y, Z, X) to resize along (Z, X) with cv2.resize
         vol_t = np.transpose(self.volume, (1, 0, 2))
         vol_resized_t = np.empty((self.volume.shape[1], target_z, self.volume.shape[2]), dtype=np.float32)
         for y in range(self.volume.shape[1]):
@@ -184,6 +202,45 @@ class Boali3DReconstructor:
         self.volume_iso = np.transpose(vol_resized_t, (1, 0, 2))
 
         # Smart Table / Scanner Bed Removal
+        self._remove_scanner_couch()
+
+        if progress_callback:
+            progress_callback(50, "حذف خودکار تخت معاینه و تفکیک بافت‌ها...")
+
+        return self.volume_iso.shape
+
+    def load_series_from_slices(self, slices_list, slice_thickness=1.25, progress_callback=None):
+        """Builds isotropic 3D volume directly from preloaded numpy slices (instant zero-disk lag)."""
+        self.slice_thickness = slice_thickness
+        processed = []
+        for idx, s in enumerate(slices_list):
+            img = s
+            if img.dtype != np.uint8:
+                img = (np.clip(img, 0.0, 1.0) * 255.0).astype(np.uint8)
+            if (img.shape[1], img.shape[0]) != self.target_res:
+                img = cv2.resize(img, self.target_res, interpolation=cv2.INTER_AREA)
+            img[:10, :] = 0
+            img[-12:, :] = 0
+            img[:, :10] = 0
+            img[:, -12:] = 0
+            h, w = img.shape
+            img[int(h*0.82):, int(w*0.82):] = 0
+            processed.append(img)
+
+        self.volume = np.stack(processed, axis=0).astype(np.float32)
+
+        z_dim = self.volume.shape[0]
+        z_ratio = max(1.0, (self.slice_thickness / self.pixel_spacing))
+        target_z = min(int(z_dim * z_ratio), 180)
+
+        if progress_callback:
+            progress_callback(40, "درون‌یابی ایزوتروپیک سه‌بعدی وکسل‌ها (Isotropic Resampling)...")
+
+        vol_t = np.transpose(self.volume, (1, 0, 2))
+        vol_resized_t = np.empty((self.volume.shape[1], target_z, self.volume.shape[2]), dtype=np.float32)
+        for y in range(self.volume.shape[1]):
+            vol_resized_t[y] = cv2.resize(vol_t[y], (self.volume.shape[2], target_z), interpolation=cv2.INTER_LINEAR)
+        self.volume_iso = np.transpose(vol_resized_t, (1, 0, 2))
         self._remove_scanner_couch()
 
         if progress_callback:
