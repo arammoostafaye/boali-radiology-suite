@@ -29,7 +29,7 @@ jobs:
           python -m pip install --upgrade pip
           # CPU wheel on purpose: the CUDA wheels add ~2.5 GB of unused DLLs.
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          pip install "opencv-python-headless>=4.8" "numpy>=1.24" "Pillow>=10" "pydicom>=2.4" "python-docx>=1.1" "cryptography>=41.0" "reportlab>=4.0" "arabic-reshaper>=3.0" "python-bidi>=0.4" pyinstaller
+          pip install "opencv-python-headless>=4.8" "numpy>=1.24" "Pillow>=10" "pydicom>=2.4" "python-docx>=1.1" "cryptography>=41.0" "reportlab>=4.0" "arabic-reshaper>=3.0" "python-bidi>=0.4" "scipy>=1.10" "scikit-image>=0.20" vtk pyinstaller
 
       - name: Download model weights (bundled into the app for offline use)
         run: |
@@ -51,7 +51,7 @@ jobs:
         run: |
           cd offline_package
           # single line: the workflow shell is pwsh, where ^ is not a continuation
-          pyinstaller --noconfirm --onedir --windowed --name "BoneSuppressionAI" --add-data "weights;weights" --add-data "config.json;." --add-data "fonts;fonts" --collect-all torch --collect-all torchvision --collect-all cv2 --collect-all docx --collect-all cryptography --collect-all reportlab BoneSuppression_Desktop.py
+          pyinstaller --noconfirm --onedir --windowed --name "BoneSuppressionAI" --add-data "weights;weights" --add-data "config.json;." --add-data "fonts;fonts" --collect-all torch --collect-all torchvision --collect-all cv2 --collect-all docx --collect-all cryptography --collect-all reportlab --collect-all vtk --collect-all skimage --collect-all scipy BoneSuppression_Desktop.py
           if (Test-Path "apply_update.bat") {
               Copy-Item "apply_update.bat" "dist\BoneSuppressionAI\" -Force
           }
