@@ -72,6 +72,10 @@ else:
     EXE_DIR = os.path.dirname(os.path.abspath(__file__))
     BUNDLE_DIR = EXE_DIR
 
+for path_dir in [EXE_DIR, BUNDLE_DIR, os.path.join(EXE_DIR, "libs")]:
+    if path_dir and path_dir not in sys.path:
+        sys.path.insert(0, path_dir)
+
 PARENT_DIR = os.path.dirname(EXE_DIR)
 GRANDPARENT_DIR = os.path.dirname(PARENT_DIR)
 

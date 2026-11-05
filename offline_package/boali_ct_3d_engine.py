@@ -3,7 +3,9 @@ Boali Hospital Radiology AI Platform - 3D CT Reconstruction Studio Engine
 نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی
 نسخه v3.0.0
 
-Comprehensive 3D Medical Volume Rendering & Multi-Organ Surface Reconstruction Engine
+High-Speed Pure OpenCV/NumPy 3D Volume Rendering & Multi-Organ Surface Reconstruction Engine.
+Requires ZERO external heavy scientific packages (No scipy, no external daemon required).
+100% Offline, Native Windows Compatible.
 Author: آرام مصطفائی (Aram Mostafaei)
 Network: شبکه بهداشت و درمان مریوان - بیمارستان بوعلی
 """
@@ -14,7 +16,6 @@ import time
 import math
 import numpy as np
 import cv2
-from scipy.ndimage import rotate, zoom, gaussian_filter
 
 # Anatomical Presets Configuration
 PRESETS = {
@@ -117,7 +118,7 @@ class Boali3DReconstructor:
         self.pixel_spacing = 0.5
 
     def load_series_from_folder(self, folder_path, slice_thickness=1.25, progress_callback=None):
-        """Loads a stack of CT image files (.jpg, .png, or .dcm) and constructs a 3D numpy volume."""
+        """Loads a stack of CT image files (.jpg, .png, or .dcm) and constructs an isotropic 3D volume."""
         if not os.path.isdir(folder_path):
             raise FileNotFoundError(f"Folder not found: {folder_path}")
 
@@ -147,8 +148,8 @@ class Boali3DReconstructor:
             if img is not None:
                 if (img.shape[1], img.shape[0]) != self.target_res:
                     img = cv2.resize(img, self.target_res, interpolation=cv2.INTER_AREA)
-                
-                # Zero out extreme outer borders (scanner boundary lines & burn-in text)
+
+                # Clean outer boundary scanner lines
                 img[:10, :] = 0
                 img[-12:, :] = 0
                 img[:, :10] = 0
@@ -156,7 +157,7 @@ class Boali3DReconstructor:
                 # Zero out scout localizer in bottom-right corner if present
                 h, w = img.shape
                 img[int(h*0.82):, int(w*0.82):] = 0
-                
+
                 slices.append(img)
 
             if progress_callback and idx % 5 == 0:
@@ -167,16 +168,20 @@ class Boali3DReconstructor:
 
         self.volume = np.stack(slices, axis=0).astype(np.float32)
 
-        # Resample along Z-axis to produce isotropic voxels
+        # Pure OpenCV/NumPy Isotropic Resampling along Z-axis
+        z_dim = self.volume.shape[0]
         z_ratio = max(1.0, (self.slice_thickness / self.pixel_spacing))
-        target_z = int(self.volume.shape[0] * z_ratio)
-        target_z = min(target_z, 220)
+        target_z = min(int(z_dim * z_ratio), 180)
 
         if progress_callback:
             progress_callback(40, "درون‌یابی ایزوتروپیک سه‌بعدی وکسل‌ها (Isotropic Resampling)...")
 
-        zoom_factors = (target_z / self.volume.shape[0], 1.0, 1.0)
-        self.volume_iso = zoom(self.volume, zoom_factors, order=1)
+        # Volume is (Z, Y, X). Transpose to (Y, Z, X) to resize along (Z, X) with cv2.resize
+        vol_t = np.transpose(self.volume, (1, 0, 2))
+        vol_resized_t = np.empty((self.volume.shape[1], target_z, self.volume.shape[2]), dtype=np.float32)
+        for y in range(self.volume.shape[1]):
+            vol_resized_t[y] = cv2.resize(vol_t[y], (self.volume.shape[2], target_z), interpolation=cv2.INTER_LINEAR)
+        self.volume_iso = np.transpose(vol_resized_t, (1, 0, 2))
 
         # Smart Table / Scanner Bed Removal
         self._remove_scanner_couch()
@@ -201,37 +206,44 @@ class Boali3DReconstructor:
                     self.volume_iso[z, table_region_y:, x] = 0.0
 
     def render_shaded_view(self, angle_deg=0.0, preset_key="BONE_TRAUMA", light_dir=None):
-        """Renders one high-quality shaded 3D perspective at given rotation angle."""
+        """Renders one high-quality shaded 3D perspective at given rotation angle using fast OpenCV routines."""
         if self.volume_iso is None:
             raise ValueError("No volume loaded. Call load_series_from_folder first.")
 
         preset = PRESETS.get(preset_key, PRESETS["BONE_TRAUMA"])
-        sigma = preset["smooth_sigma"]
         threshold = preset["hu_threshold"]
 
-        # Smooth volume
-        vol_smooth = gaussian_filter(self.volume_iso, sigma=sigma)
+        # Fast Gaussian blur on each slice using OpenCV
+        vol_smooth = np.empty_like(self.volume_iso)
+        for z in range(self.volume_iso.shape[0]):
+            vol_smooth[z] = cv2.GaussianBlur(self.volume_iso[z], (5, 5), 0.8)
 
-        # Rotate around vertical Z-axis (axes 1 and 2)
+        # Fast 3D rotation around Z-axis using cv2.warpAffine
         if angle_deg != 0.0:
-            rot = rotate(vol_smooth, angle_deg, axes=(1, 2), reshape=False, order=1)
+            h, w = self.volume_iso.shape[1], self.volume_iso.shape[2]
+            center = (w / 2.0, h / 2.0)
+            M = cv2.getRotationMatrix2D(center, angle_deg, 1.0)
+            rot = np.empty_like(vol_smooth)
+            for z in range(vol_smooth.shape[0]):
+                rot[z] = cv2.warpAffine(vol_smooth[z], M, (w, h), flags=cv2.INTER_LINEAR,
+                                        borderMode=cv2.BORDER_CONSTANT, borderValue=0)
         else:
             rot = vol_smooth
 
         if light_dir is None:
-            L = np.array([0.4, 0.8, -0.4]) # Light from top-left-front
+            L = np.array([0.4, 0.8, -0.4])
         else:
             L = np.array(light_dir)
         L = L / np.linalg.norm(L)
 
-        # Fast surface ray-casting along ray axis 1 (anterior-posterior depth)
+        # Surface ray-casting along ray axis 1 (anterior-posterior depth)
         mask = rot > threshold
         hit = np.any(mask, axis=1)
         if not np.any(hit):
             return np.zeros((rot.shape[0], rot.shape[2], 3), dtype=np.uint8)
 
         depth = np.argmax(mask, axis=1).astype(np.float32)
-        depth = gaussian_filter(depth, sigma=1.0)
+        depth = cv2.GaussianBlur(depth, (5, 5), 1.0)
 
         # Surface normal from 2D depth gradients
         dz, dx = np.gradient(depth)
@@ -269,7 +281,13 @@ class Boali3DReconstructor:
         threshold = preset["hu_threshold"]
 
         if angle_deg != 0.0:
-            rot = rotate(self.volume_iso, angle_deg, axes=(1, 2), reshape=False, order=1)
+            h, w = self.volume_iso.shape[1], self.volume_iso.shape[2]
+            center = (w / 2.0, h / 2.0)
+            M = cv2.getRotationMatrix2D(center, angle_deg, 1.0)
+            rot = np.empty_like(self.volume_iso)
+            for z in range(self.volume_iso.shape[0]):
+                rot[z] = cv2.warpAffine(self.volume_iso[z], M, (w, h), flags=cv2.INTER_LINEAR,
+                                        borderMode=cv2.BORDER_CONSTANT, borderValue=0)
         else:
             rot = self.volume_iso
 
@@ -324,14 +342,18 @@ class Boali3DReconstructor:
             cv2.imwrite(os.path.join(output_dir, f"KEY_3D_{label}.jpg"), view)
 
     def export_stl_mesh(self, output_stl_path, threshold=95):
-        """Exports 3D surface mesh as an STL file for 3D printing of bone/fracture."""
+        """Exports 3D surface mesh as an STL file for 3D printing of bone/fracture (optional)."""
         if self.volume_iso is None:
             raise ValueError("No volume loaded.")
-        from skimage import measure
-        import trimesh
-
-        vol_smooth = gaussian_filter(self.volume_iso, sigma=0.8)
-        verts, faces, normals, values = measure.marching_cubes(vol_smooth, threshold, spacing=(1.0, 1.0, 1.0))
-        mesh = trimesh.Trimesh(vertices=verts, faces=faces, vertex_normals=normals)
-        mesh.export(output_stl_path)
-        return len(verts), len(faces)
+        try:
+            from skimage import measure
+            import trimesh
+            vol_smooth = np.empty_like(self.volume_iso)
+            for z in range(self.volume_iso.shape[0]):
+                vol_smooth[z] = cv2.GaussianBlur(self.volume_iso[z], (5, 5), 0.8)
+            verts, faces, normals, values = measure.marching_cubes(vol_smooth, threshold, spacing=(1.0, 1.0, 1.0))
+            mesh = trimesh.Trimesh(vertices=verts, faces=faces, vertex_normals=normals)
+            mesh.export(output_stl_path)
+            return len(verts), len(faces)
+        except ImportError:
+            raise ImportError("برای خروجی فایل STL پرینتر سه‌بعدی، پکیج‌های scikit-image و trimesh مورد نیاز است.")

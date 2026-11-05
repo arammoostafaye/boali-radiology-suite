@@ -17,10 +17,27 @@ import cv2
 import numpy as np
 from PIL import Image, ImageTk
 
+# Ensure current directory is in sys.path
+cur_dir = os.path.dirname(os.path.abspath(__file__))
+if cur_dir not in sys.path:
+    sys.path.insert(0, cur_dir)
+
 try:
     from boali_ct_3d_engine import Boali3DReconstructor, PRESETS
-except ImportError:
-    from offline_package.boali_ct_3d_engine import Boali3DReconstructor, PRESETS
+except Exception as err:
+    try:
+        import importlib.util
+        engine_path = os.path.join(cur_dir, "boali_ct_3d_engine.py")
+        if os.path.exists(engine_path):
+            spec = importlib.util.spec_from_file_location("boali_ct_3d_engine", engine_path)
+            engine_mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(engine_mod)
+            Boali3DReconstructor = engine_mod.Boali3DReconstructor
+            PRESETS = engine_mod.PRESETS
+        else:
+            raise err
+    except Exception:
+        raise err
 
 # Theme tokens
 C_CANVAS = "#090d16"

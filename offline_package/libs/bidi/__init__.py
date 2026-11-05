@@ -18,7 +18,10 @@
 # Copyright (C) 2010-2024 Meir kriheli <mkriheli@gmail.com>.
 #
 
-from .wrapper import get_base_level, get_display
+try:
+    from .wrapper import get_base_level, get_display
+except Exception:
+    from .algorithm import get_base_level, get_display
 
 __all__ = ["get_base_level", "get_display"]
 
