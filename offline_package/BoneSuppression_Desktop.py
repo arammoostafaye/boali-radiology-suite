@@ -32,6 +32,7 @@ import numpy as np
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 import queue
+import threading
 from PIL import Image, ImageTk
 from pacs_downloader import MedalPacsClient, PacsCacheManager
 
@@ -2104,10 +2105,13 @@ class MedalPacsModal(tk.Toplevel):
         elif mod == "ct3d":
             ct_folder = os.path.dirname(dicom_files[0]) if dicom_files else ""
             self.destroy()
+            # 1. Load into main workstation viewer
+            self.app.load_ct_series_to_app(ct_folder, dicom_files, pname=pname, pid=pid)
+            # 2. Open 3D CT Reconstruction Studio with pre-loaded series
             self.app.open_3d_ct_studio(folder=ct_folder)
             messagebox.showinfo("اتمام دریافت سی‌تی اسکن از پکس",
-                                f"مقاطع سی‌تی اسکن بیمار ({len(dicom_files)} مقطع دایکام) با موفقیت از پکس ({connected_base}) دریافت و در استودیوی بازسازی سه‌بعدی بارگذاری گردید:\n\n"
-                                f"نام بیمار: {pname}\nشناسه: {pid}\nپوشه مقاطع: {ct_folder}")
+                                f"مقاطع سی‌تی اسکن بیمار ({len(dicom_files)} مقطع دایکام) با موفقیت از پکس ({connected_base}) دریافت و در محیط اصلی نرم‌افزار و استودیوی سه‌بعدی بارگذاری گردید:\n\n"
+                                f"نام بیمار: {pname}\nشناسه: {pid}\nتعداد مقاطع: {len(dicom_files)}\nپوشه ذخیره: {ct_folder}")
         else:
             if dicom_files:
                 self.app.load_single_dicom(dicom_files[0], pname=pname, pid=pid)
@@ -4373,6 +4377,12 @@ class BoneSuppressionApp(tk.Tk):
                 if self.mammo_views.get(active_s) and self.mammo_views[active_s].get("arr") is not None:
                     self.original_np = self.mammo_views[active_s]["arr"]
 
+        if self.active_ai_module.get() == "ct3d":
+            if getattr(self, "ct_slices", None) and len(self.ct_slices) > 0:
+                idx = getattr(self, "ct_slice_idx", 0)
+                idx = max(0, min(idx, len(self.ct_slices) - 1))
+                self.original_np = self.ct_slices[idx]
+
         if self.original_np is None:
             self.canvas.delete("all")
             cx, cy = cw // 2, ch // 2
@@ -4635,6 +4645,42 @@ class BoneSuppressionApp(tk.Tk):
     def open_pacs_modal(self):
         MedalPacsModal(self, pacs_client=self.pacs_client)
 
+    def load_ct_series_to_app(self, folder, files=None, pname="", pid=""):
+        """Loads complete CT slice series into main desktop viewer for slice-by-slice navigation."""
+        if not files and os.path.isdir(folder):
+            files = sorted([os.path.join(folder, f) for f in os.listdir(folder)
+                            if f.lower().endswith(('.dcm', '.jpg', '.jpeg', '.png', '.tif'))])
+        if not files:
+            return
+
+        self.ct_series_folder = folder
+        self.ct_slices = []
+        self.ct_slice_meta = []
+
+        if pname and not self.patient_info.get("name"):
+            self.patient_info["name"] = pname.replace("^", " ").replace("_", " ")
+        if pid and not self.patient_info.get("id"):
+            self.patient_info["id"] = pid
+
+        for f in files:
+            try:
+                arr, meta = self.read_image(f)
+                if arr is not None:
+                    self.ct_slices.append(arr)
+                    self.ct_slice_meta.append(meta)
+                    if not self.patient_info.get("name") and meta.get("patient_name"):
+                        self.update_patient_meta(meta)
+            except Exception:
+                continue
+
+        if self.ct_slices:
+            self.ct_slice_idx = len(self.ct_slices) // 2 # Center slice
+            self.original_np = self.ct_slices[self.ct_slice_idx]
+            self.active_ai_module.set("ct3d")
+            self.refresh_sidebar_ui()
+            self.render_view()
+            self.status_label.config(text=f"✓ سری سی‌تی اسکن ({len(self.ct_slices)} مقطع) برای {self.patient_info.get('name', '')} در نرم‌افزار بارگذاری شد.")
+
     def load_dicom_files_to_mammo(self, files, pname="", pid=""):
         if not files:
             return
@@ -4777,6 +4823,15 @@ class BoneSuppressionApp(tk.Tk):
         return d_map.get(comp, d_map["b"])
 
     def on_canvas_wheel(self, event, delta=None):
+        if self.active_ai_module.get() == "ct3d" and getattr(self, "ct_slices", None) and len(self.ct_slices) > 0:
+            d = delta if delta is not None else event.delta
+            step = -1 if d > 0 else 1
+            self.ct_slice_idx = (self.ct_slice_idx + step) % len(self.ct_slices)
+            self.original_np = self.ct_slices[self.ct_slice_idx]
+            self.render_view()
+            self.status_label.config(text=f"🔬 مقطع محوری سی‌تی: مقطع {self.ct_slice_idx + 1} از {len(self.ct_slices)} | {self.patient_info.get('name', '')}")
+            return
+
         if self.active_ai_module.get() == "mammo" and self.mammo_quad_mode.get():
             if delta is None:
                 delta = event.delta
