@@ -126,16 +126,31 @@ class Boali3DCTStudioDialog(tk.Toplevel):
         entry_f = tk.Entry(f_box, textvariable=self.folder_var, font=("Arial", 8), bg=C_CANVAS, fg=C_TEXT_LIGHT, insertbackground="white")
         entry_f.pack(fill=tk.X, padx=8, pady=(4, 2))
 
+        f_btn_row = tk.Frame(f_box, bg=C_CARD)
+        f_btn_row.pack(fill=tk.X, padx=8, pady=(2, 4))
+
         btn_browse = tk.Button(
-            f_box,
-            text="📂 انتخاب پوشه اسلایس‌ها...",
+            f_btn_row,
+            text="📂 انتخاب پوشه محلی...",
             font=("Vazirmatn", 8),
             bg=C_BORDER,
             fg=C_TEXT_LIGHT,
             relief=tk.FLAT,
             command=self._browse_folder
         )
-        btn_browse.pack(fill=tk.X, padx=8, pady=(2, 6))
+        btn_browse.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
+
+        btn_pacs_ct = tk.Button(
+            f_btn_row,
+            text="🌐 فراخوانی از پکس مدال",
+            font=("Vazirmatn", 8, "bold"),
+            bg="#0284c7",
+            fg="white",
+            activebackground="#0369a1",
+            relief=tk.FLAT,
+            command=self._open_pacs_for_ct
+        )
+        btn_pacs_ct.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(2, 0))
 
         # Preset Selector
         p_box = tk.LabelFrame(left_panel, text="پریست تخصصی ارگان (Clinical Preset)", font=("Vazirmatn", 8, "bold"),
@@ -228,6 +243,18 @@ class Boali3DCTStudioDialog(tk.Toplevel):
         )
         self.lbl_angle.pack(side=tk.RIGHT, padx=12, pady=6)
 
+        self.studio_view_mode = tk.StringVar(value="3d_vr")
+        mode_box = tk.Frame(v_head, bg=C_HEADER)
+        mode_box.pack(side=tk.RIGHT, padx=8)
+
+        tk.Radiobutton(mode_box, text="🧊 بازسازی ۳D", variable=self.studio_view_mode, value="3d_vr",
+                       command=self._on_view_mode_toggle, bg=C_HEADER, fg=C_CYAN, selectcolor=C_CANVAS,
+                       activebackground=C_HEADER, activeforeground=C_CYAN, font=("Vazirmatn", 8, "bold")).pack(side=tk.RIGHT, padx=2)
+
+        tk.Radiobutton(mode_box, text="🔬 مقاطع محوری ۲D", variable=self.studio_view_mode, value="2d_axial",
+                       command=self._on_view_mode_toggle, bg=C_HEADER, fg=C_TEXT_LIGHT, selectcolor=C_CANVAS,
+                       activebackground=C_HEADER, activeforeground=C_CYAN, font=("Vazirmatn", 8, "bold")).pack(side=tk.RIGHT, padx=2)
+
         lbl_hint = tk.Label(
             v_head,
             text="💡 برای چرخش ۳۶۰ درجه، اسکرول موس را روی تصویر بچرخانید",
@@ -289,6 +316,15 @@ class Boali3DCTStudioDialog(tk.Toplevel):
             command=self._export_stl
         )
         btn_stl.pack(side=tk.RIGHT, padx=6)
+
+    def _open_pacs_for_ct(self):
+        try:
+            from BoneSuppression_Desktop import MedalPacsModal
+            parent_pacs = getattr(self.master, "pacs_client", None)
+            modal = MedalPacsModal(self, pacs_client=parent_pacs)
+            modal.target_modality.set("ct3d")
+        except Exception:
+            messagebox.showinfo("پکس مدال", "لطفاً مقاطع سی‌تی اسکن را از پنجره پکس نرم‌افزار اصلی دریافت فرمایید.")
 
     def _browse_folder(self):
         d = filedialog.askdirectory(title="انتخاب پوشه مقاطع سی‌تی اسکن")
@@ -365,7 +401,48 @@ class Boali3DCTStudioDialog(tk.Toplevel):
         self.lbl_status.config(text="خطا در بازسازی ۳D")
         messagebox.showerror("خطا در بازسازی سه‌بعدی", f"عملیات با خطا مواجه شد:\n{err_msg}")
 
+    def _on_view_mode_toggle(self):
+        if self.studio_view_mode.get() == "2d_axial":
+            total_axial = self.engine.volume.shape[0] if (self.engine.volume is not None) else 0
+            if total_axial > 0:
+                self.slider_rot.config(from_=0, to=total_axial - 1)
+                self.slider_rot.set(min(self.current_frame_idx, total_axial - 1))
+                self._display_axial_slice(int(self.slider_rot.get()))
+            else:
+                messagebox.showinfo("اطلاع", "ابتدا مقاطع سی‌تی اسکن را بارگذاری فرمایید.")
+        else:
+            if self.cine_frames:
+                self.slider_rot.config(from_=0, to=len(self.cine_frames) - 1)
+                self.slider_rot.set(min(self.current_frame_idx, len(self.cine_frames) - 1))
+                self._display_frame(int(self.slider_rot.get()))
+
+    def _display_axial_slice(self, slice_idx):
+        if self.engine.volume is None:
+            return
+        total = self.engine.volume.shape[0]
+        slice_idx = max(0, min(slice_idx, total - 1))
+        self.current_frame_idx = slice_idx
+        self.lbl_angle.config(text=f"🔬 مقطع محوری ۲D سی‌تی: مقطع {slice_idx + 1} از {total}")
+
+        sl = self.engine.volume[slice_idx].astype(np.uint8)
+        sl_bgr = cv2.cvtColor(sl, cv2.COLOR_GRAY2BGR)
+
+        canvas_h = self.canvas_3d.winfo_height() or 460
+        canvas_w = self.canvas_3d.winfo_width() or 460
+        h, w = sl_bgr.shape[:2]
+        scale = min(canvas_w / w, canvas_h / h, 2.0)
+        nw, nh = int(w * scale), int(h * scale)
+        res = cv2.resize(sl_bgr, (nw, nh), interpolation=cv2.INTER_LINEAR)
+
+        rgb = cv2.cvtColor(res, cv2.COLOR_BGR2RGB)
+        im_pil = Image.fromarray(rgb)
+        self.tk_photo = ImageTk.PhotoImage(im_pil)
+        self.canvas_3d.config(image=self.tk_photo)
+
     def _display_frame(self, idx):
+        if self.studio_view_mode.get() == "2d_axial":
+            self._display_axial_slice(idx)
+            return
         if not self.cine_frames:
             return
         idx = max(0, min(idx, len(self.cine_frames) - 1))

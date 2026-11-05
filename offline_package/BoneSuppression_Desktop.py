@@ -465,11 +465,15 @@ class ClinicalReportModal(tk.Toplevel):
             gen = BoaliPDFReportGenerator()
             rep_type = self.report_type.get()
             p_info = {
-                "name": self.patient_name.get() or "بیمار بالینی",
-                "id": self.patient_id.get() or "1038432",
-                "date": self.exam_date.get() or time.strftime("%Y/%m/%d"),
-                "age": self.patient_age.get() or "35"
+                "name": (self.p_name_var.get().strip() if hasattr(self, "p_name_var") else "") or getattr(self.app, "patient_info", {}).get("name", "بیمار بالینی"),
+                "id": (self.p_id_var.get().strip() if hasattr(self, "p_id_var") else "") or getattr(self.app, "patient_info", {}).get("id", "1038432"),
+                "date": (self.p_date_var.get().strip() if hasattr(self, "p_date_var") else "") or getattr(self.app, "patient_info", {}).get("date", time.strftime("%Y/%m/%d")),
+                "age": (self.p_age_var.get().strip() if hasattr(self, "p_age_var") else "") or getattr(self.app, "patient_info", {}).get("age", "35")
             }
+
+            birads_num = 1
+            if hasattr(self.app, "mammo_results") and self.app.mammo_results:
+                birads_num = self.app.mammo_results.get("birads", 1)
 
             if rep_type == "mammo":
                 findings = [
@@ -481,16 +485,35 @@ class ClinicalReportModal(tk.Toplevel):
                 ]
                 impr = [
                     "• پستان‌های دوطرفه فاقد شواهد رادیولوژیک به نفع ضایعه بدخیم یا توده مشکوک می‌باشند.",
-                    f"• رده‌بندی تشخیصی: BI-RADS {self.override_birads.get()} (نرمال / خوش‌خیم)."
+                    f"• رده‌بندی تشخیصی: BI-RADS {birads_num} (نرمال / خوش‌خیم)."
                 ]
                 pacs = [
                     "EXAMINATION: BILATERAL DIGITAL MAMMOGRAPHY (4-VIEW FFDM)",
                     "FINDINGS: Symmetric fibroglandular density. No suspicious mass, distortion, or malignant calcifications.",
-                    f"IMPRESSION: BI-RADS {self.override_birads.get()} - NEGATIVE FOR MALIGNANCY."
+                    f"IMPRESSION: BI-RADS {birads_num} - NEGATIVE FOR MALIGNANCY."
                 ]
                 recs = [
                     "۱. ادامه غربالگری سالیانه ماموگرافی در سنین بالای ۴۰ سال.",
                     "۲. در صورت لمس هرگونه توده جدید، معاینه و سونوگرافی تکمیلی پیشنهاد می‌شود."
+                ]
+            elif rep_type in ("ct", "ct3d", "ct_3d"):
+                findings = [
+                    ("۱. کانتور و ساختار سه‌بعدی اسکلت و ارگان‌ها", "بازسازی سه‌بعدی حجم CT نشان‌دهنده کانتور طبیعی و تقارن ساختارهای کورتیکال است."),
+                    ("۲. بررسی شکستگی، انحراف و یکپارچگی استخوان", "عدم وجود شکستگی حاد تروماتیک جابه‌جا شده در نمای بازسازی‌شده ۳D."),
+                    ("۳. ارزیابی فضاهای مفصلی و سطوح مفصلی", "راستای سطوح مفصلی در نمای چرخشی ۳۶۰ درجه کاملاً حفظ شده است.")
+                ]
+                impr = [
+                    "• بازسازی سه‌بعدی سی‌تی اسکن فاقد شواهد شکستگی تروماتیک یا ناهنجاری ساختاری ماکروسکوپیک است.",
+                    "• راستای آناتومیک ساختارهای استخوانی در رندر سه‌بعدی حفظ گردیده است."
+                ]
+                pacs = [
+                    "EXAMINATION: 3D CT VOLUME RENDERING RECONSTRUCTION",
+                    "FINDINGS: Symmetric cortical contour on 360-degree cine. No displaced traumatic bone fracture.",
+                    "IMPRESSION: UNREMARKABLE 3D CT RECONSTRUCTION. NO ACUTE FRACTURE IDENTIFIED."
+                ]
+                recs = [
+                    "۱. تطابق با مقاطع محوری نازک (Axial Thin Slices) و پنجره‌های اختصاصی بافت نرم و استخوان.",
+                    "۲. پیگیری بالینی بر اساس اندیکاسیون اولیه ارجاع بیمار."
                 ]
             elif rep_type == "ortho":
                 findings = [
@@ -1943,6 +1966,12 @@ class MedalPacsModal(tk.Toplevel):
                              activebackground=C_CARD, activeforeground=C_CYAN, font=("Segoe UI", 9, "bold"))
         rb2.pack(anchor=tk.W, pady=3)
 
+        rb3 = tk.Radiobutton(row_mods, text="  🧊 مقاطع سی‌تی اسکن و استودیوی بازسازی سه‌بعدی (3D CT Reconstruction Studio)\n     ➔ دریافت کامل اسلایس‌های CT، تفکیک خودکار تخت و ورود مستقیم به استودیوی سه‌بعدی ۳۶۰ درجه",
+                             variable=self.target_modality, value="ct3d", justify=tk.LEFT,
+                             bg=C_CARD, fg="#38bdf8", selectcolor="#070d19",
+                             activebackground=C_CARD, activeforeground="#38bdf8", font=("Segoe UI", 9, "bold"))
+        rb3.pack(anchor=tk.W, pady=3)
+
         # 4. Actions & Cache Cleaning Bar
         action_bar = tk.Frame(body, bg=C_CANVAS)
         action_bar.pack(fill=tk.X, pady=(0, 8))
@@ -2072,6 +2101,13 @@ class MedalPacsModal(tk.Toplevel):
                                 f"نام بیمار: {pname}\nشناسه / پرونده: {pid}\nتعداد فایل‌ها: {len(dicom_files)}",
                                 parent=self)
             self.destroy()
+        elif mod == "ct3d":
+            ct_folder = os.path.dirname(dicom_files[0]) if dicom_files else ""
+            self.destroy()
+            self.app.open_3d_ct_studio(folder=ct_folder)
+            messagebox.showinfo("اتمام دریافت سی‌تی اسکن از پکس",
+                                f"مقاطع سی‌تی اسکن بیمار ({len(dicom_files)} مقطع دایکام) با موفقیت از پکس ({connected_base}) دریافت و در استودیوی بازسازی سه‌بعدی بارگذاری گردید:\n\n"
+                                f"نام بیمار: {pname}\nشناسه: {pid}\nپوشه مقاطع: {ct_folder}")
         else:
             if dicom_files:
                 self.app.load_single_dicom(dicom_files[0], pname=pname, pid=pid)
@@ -2568,16 +2604,31 @@ class Boali3DCTStudioDialog(tk.Toplevel):
         entry_f = tk.Entry(f_box, textvariable=self.folder_var, font=("Arial", 8), bg=C_CANVAS, fg=C_TEXT_LIGHT, insertbackground="white")
         entry_f.pack(fill=tk.X, padx=8, pady=(4, 2))
 
+        f_btn_row = tk.Frame(f_box, bg=C_CARD)
+        f_btn_row.pack(fill=tk.X, padx=8, pady=(2, 4))
+
         btn_browse = tk.Button(
-            f_box,
-            text="📂 انتخاب پوشه اسلایس‌ها...",
+            f_btn_row,
+            text="📂 انتخاب پوشه محلی...",
             font=("Vazirmatn", 8),
             bg=C_BORDER,
             fg=C_TEXT_LIGHT,
             relief=tk.FLAT,
             command=self._browse_folder
         )
-        btn_browse.pack(fill=tk.X, padx=8, pady=(2, 6))
+        btn_browse.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
+
+        btn_pacs_ct = tk.Button(
+            f_btn_row,
+            text="🌐 فراخوانی مستقیم از پکس مدال",
+            font=("Vazirmatn", 8, "bold"),
+            bg="#0284c7",
+            fg="white",
+            activebackground="#0369a1",
+            relief=tk.FLAT,
+            command=self._open_pacs_for_ct
+        )
+        btn_pacs_ct.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(2, 0))
 
         # Preset Selector
         p_box = tk.LabelFrame(left_panel, text="پریست تخصصی ارگان (Clinical Preset)", font=("Vazirmatn", 8, "bold"),
@@ -2670,6 +2721,18 @@ class Boali3DCTStudioDialog(tk.Toplevel):
         )
         self.lbl_angle.pack(side=tk.RIGHT, padx=12, pady=6)
 
+        self.studio_view_mode = tk.StringVar(value="3d_vr")
+        mode_box = tk.Frame(v_head, bg=C_HEADER)
+        mode_box.pack(side=tk.RIGHT, padx=8)
+
+        tk.Radiobutton(mode_box, text="🧊 بازسازی ۳D", variable=self.studio_view_mode, value="3d_vr",
+                       command=self._on_view_mode_toggle, bg=C_HEADER, fg=C_CYAN, selectcolor=C_CANVAS,
+                       activebackground=C_HEADER, activeforeground=C_CYAN, font=("Vazirmatn", 8, "bold")).pack(side=tk.RIGHT, padx=2)
+
+        tk.Radiobutton(mode_box, text="🔬 مقاطع محوری ۲D", variable=self.studio_view_mode, value="2d_axial",
+                       command=self._on_view_mode_toggle, bg=C_HEADER, fg=C_TEXT_LIGHT, selectcolor=C_CANVAS,
+                       activebackground=C_HEADER, activeforeground=C_CYAN, font=("Vazirmatn", 8, "bold")).pack(side=tk.RIGHT, padx=2)
+
         lbl_hint = tk.Label(
             v_head,
             text="💡 برای چرخش ۳۶۰ درجه، اسکرول موس را روی تصویر بچرخانید",
@@ -2731,6 +2794,11 @@ class Boali3DCTStudioDialog(tk.Toplevel):
             command=self._export_stl
         )
         btn_stl.pack(side=tk.RIGHT, padx=6)
+
+    def _open_pacs_for_ct(self):
+        parent_pacs = getattr(self.master, "pacs_client", None)
+        modal = MedalPacsModal(self, pacs_client=parent_pacs)
+        modal.target_modality.set("ct3d")
 
     def _browse_folder(self):
         d = filedialog.askdirectory(title="انتخاب پوشه مقاطع سی‌تی اسکن")
@@ -2807,7 +2875,48 @@ class Boali3DCTStudioDialog(tk.Toplevel):
         self.lbl_status.config(text="خطا در بازسازی ۳D")
         messagebox.showerror("خطا در بازسازی سه‌بعدی", f"عملیات با خطا مواجه شد:\n{err_msg}")
 
+    def _on_view_mode_toggle(self):
+        if self.studio_view_mode.get() == "2d_axial":
+            total_axial = self.engine.volume.shape[0] if (self.engine.volume is not None) else 0
+            if total_axial > 0:
+                self.slider_rot.config(from_=0, to=total_axial - 1)
+                self.slider_rot.set(min(self.current_frame_idx, total_axial - 1))
+                self._display_axial_slice(int(self.slider_rot.get()))
+            else:
+                messagebox.showinfo("اطلاع", "ابتدا مقاطع سی‌تی اسکن را بارگذاری فرمایید.")
+        else:
+            if self.cine_frames:
+                self.slider_rot.config(from_=0, to=len(self.cine_frames) - 1)
+                self.slider_rot.set(min(self.current_frame_idx, len(self.cine_frames) - 1))
+                self._display_frame(int(self.slider_rot.get()))
+
+    def _display_axial_slice(self, slice_idx):
+        if self.engine.volume is None:
+            return
+        total = self.engine.volume.shape[0]
+        slice_idx = max(0, min(slice_idx, total - 1))
+        self.current_frame_idx = slice_idx
+        self.lbl_angle.config(text=f"🔬 مقطع محوری ۲D سی‌تی: مقطع {slice_idx + 1} از {total}")
+
+        sl = self.engine.volume[slice_idx].astype(np.uint8)
+        sl_bgr = cv2.cvtColor(sl, cv2.COLOR_GRAY2BGR)
+
+        canvas_h = self.canvas_3d.winfo_height() or 460
+        canvas_w = self.canvas_3d.winfo_width() or 460
+        h, w = sl_bgr.shape[:2]
+        scale = min(canvas_w / w, canvas_h / h, 2.0)
+        nw, nh = int(w * scale), int(h * scale)
+        res = cv2.resize(sl_bgr, (nw, nh), interpolation=cv2.INTER_LINEAR)
+
+        rgb = cv2.cvtColor(res, cv2.COLOR_BGR2RGB)
+        im_pil = Image.fromarray(rgb)
+        self.tk_photo = ImageTk.PhotoImage(im_pil)
+        self.canvas_3d.config(image=self.tk_photo)
+
     def _display_frame(self, idx):
+        if self.studio_view_mode.get() == "2d_axial":
+            self._display_axial_slice(idx)
+            return
         if not self.cine_frames:
             return
         idx = max(0, min(idx, len(self.cine_frames) - 1))
@@ -3197,11 +3306,11 @@ class BoneSuppressionApp(tk.Tk):
                                         bg="#0284c7", hover_bg="#0369a1", font=("Segoe UI", 9, "bold"), padx=12, pady=6)
         btn_pacs.pack(side=tk.LEFT, padx=6, pady=8)
 
-        btn_3d_ct = create_modern_button(toolbar, "🩻 استودیوی ۳D سی‌تی اسکن", self.open_3d_ct_studio,
-                                         bg="#7c3aed", hover_bg="#6d28d9", font=("Segoe UI", 9, "bold"), padx=12, pady=6)
+        btn_3d_ct = create_modern_button(toolbar, "🧊 استودیوی بازسازی ۳D سی‌تی", self.open_3d_ct_studio,
+                                         bg="#0284c7", hover_bg="#0369a1", font=("Segoe UI", 9, "bold"), padx=12, pady=6)
         btn_3d_ct.pack(side=tk.LEFT, padx=6, pady=8)
 
-        self.btn_run_active = create_modern_button(toolbar, "⚡ اجرای جداسازی استخوان", self.run_active_engine,
+        self.btn_run_active = create_modern_button(toolbar, "⚡ اجرای پردازش هوش مصنوعی", self.run_active_engine,
                                                    bg=C_GREEN, hover_bg=C_GREEN_HOVER, font=("Segoe UI", 9, "bold"), padx=16, pady=6)
         self.btn_run_active.pack(side=tk.LEFT, padx=6, pady=8)
 
@@ -3252,7 +3361,7 @@ class BoneSuppressionApp(tk.Tk):
         self.canvas.bind("<B2-Motion>", self.on_pan_drag)
 
         # Specialized Radiology Sidebar Frame
-        self.sidebar_frame = tk.Frame(self.work_area, bg=C_CARD, width=390, bd=1, relief=tk.SOLID,
+        self.sidebar_frame = tk.Frame(self.work_area, bg=C_CARD, width=410, bd=1, relief=tk.SOLID,
                                       highlightbackground=C_BORDER, highlightthickness=1)
         self.sidebar_frame.pack(side=tk.RIGHT, fill=tk.Y, expand=False)
         self.sidebar_frame.pack_propagate(False)
