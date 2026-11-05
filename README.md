@@ -2,13 +2,13 @@
 
 # 🩻 نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی
 ## Boali Hospital Specialized Radiology & 3D CT Reconstruction Suite
-### نگارش پایدار و رسمی: `v3.0.0`
+### نگارش پایدار و رسمی: `v3.0.0` (به‌روزرسانی جامع ۵ نوامبر ۲۰۲۶)
 
-[![Release](https://img.shields.io/badge/Release-v3.0.0-emerald?style=for-the-badge&logo=github)](https://github.com/arammoostafaye/boali-radiology-suite/releases/tag/v3.0.0)
+[![Release](https://img.shields.io/badge/Release-v3.0.0%20(Updated)-emerald?style=for-the-badge&logo=github)](https://github.com/arammoostafaye/boali-radiology-suite/releases/tag/v3.0.0)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64%20(Offline)-blue?style=for-the-badge&logo=windows)](https://github.com/arammoostafaye/boali-radiology-suite/releases/tag/v3.0.0)
-[![AI Engine](https://img.shields.io/badge/AI%20Engine-PyTorch%20%7C%20ONNX%20%7C%203D%20Raymarching-orange?style=for-the-badge&logo=pytorch)](https://pytorch.org/)
+[![AI Engine](https://img.shields.io/badge/AI%20Engine-PyTorch%20%7C%20ONNX%20%7C%20Pure%20OpenCV%203D-orange?style=for-the-badge&logo=pytorch)](https://pytorch.org/)
 [![Status](https://img.shields.io/badge/Status-Clinical%20Verified-success?style=for-the-badge)](https://github.com/arammoostafaye/boali-radiology-suite)
-[![Reporting](https://img.shields.io/badge/Reporting-Auto%20CAD%20Docx-purple?style=for-the-badge)](https://github.com/arammoostafaye/boali-radiology-suite)
+[![Reporting](https://img.shields.io/badge/Reporting-Official%20PDF%20%26%20Docx-purple?style=for-the-badge)](https://github.com/arammoostafaye/boali-radiology-suite)
 [![License](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey?style=for-the-badge)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
 
 <br/>
@@ -20,6 +20,26 @@
 ---
 
 </div>
+
+## 🌟 آخرین تغییرات و بهبودهای اعمال‌شده در نگارش v3.0.0 (۵ نوامبر ۲۰۲۶)
+
+1. **اتصال مستقیم سی‌تی اسکن به پکس مدال (Direct PACS CT Download):**
+   - افزودن گزینه اختصاصی «🧊 مقاطع سی‌تی اسکن و استودیوی بازسازی سه‌بعدی» در پنجره پکس.
+   - دریافت خودکار کل پکیج مقاطع (مثلاً ۳۸۴ مقطع دایکام) و لود مستقیم آن در استودیوی ۳D بدون ریختن تصویر روی کلیشه ۲D.
+   - دکمه مستقیم «🌐 فراخوانی از پکس مدال» در داخل پنجره استودیوی سه‌بعدی.
+2. **نمایشگر مقاطع محوری ۲D در استودیوی ۳D (Axial Slice Stack Navigator):**
+   - امکان سوئیچ لحظه‌ای بین مدل سه‌بعدی حجمی ۳۶۰ درجه و ورق زدن تک‌تک اسلایس‌های خام محوری سی‌تی اسکن.
+3. **بازطراحی کامل و مدرن‌سازی سایدبار هوش مصنوعی (Ergonomic 410px AI Sidebar):**
+   - افزایش عرض سایدبار به ۴۱۰ پیکسل جهت ارگونومی و خوانایی بی‌نقص.
+   - ساختار کاشی‌های دو ستونه منظم با آیکون‌های بالینی و رنگ‌های تفکیک‌شده.
+   - کانتینر اسکرول روان با غلطک موس (MouseWheel) بدون بریدگی یا پنهان شدن کارت‌ها.
+4. **رفع کامل خطای صدور گزارش رسمی PDF:**
+   - اتصال متغیرهای نام، سن و شماره پرونده بیمار و رفع خطای `patient_name`.
+   - صدور گزارش رسمی دو صفحه‌ای PDF با سربرگ بیمارستان بوعلی مریوان برای هر چهار ماژول (سی‌تی اسکن، ماموگرافی، قفسه سینه و شکستگی).
+5. **موتور سه‌بعدی ۱۰۰٪ مستقل و تعبیه‌شده (Pure OpenCV Native Engine):**
+   - حذف کامل وابستگی به scipy و اجرای فوق‌سریع رندر سه‌بعدی بدون نیاز به نصب پکیج خارجی.
+
+---
 
 ## 📖 معرفی پروژه (Overview)
 
