@@ -61,7 +61,7 @@ class Boali3DCTStudioDialog(tk.Toplevel):
         self.minsize(1000, 680)
         self.configure(bg=C_CANVAS)
 
-        self.engine = Boali3DReconstructor(target_resolution=(256, 256))
+        self.engine = Boali3DReconstructor(target_resolution=(512, 512), output_size=(768, 768))
         self.default_folder = default_folder
         self.report_callback = report_callback
 
@@ -166,11 +166,11 @@ class Boali3DCTStudioDialog(tk.Toplevel):
         )
         self.preset_combo["values"] = [
             "BONE_TRAUMA - استخوان و تروما (ارتوپدی و مفاصل)",
+            "BONE_TRANSPARENT_SKIN - استخوان با بافت نرم شفاف (3D Ghosting)",
             "CRANIOFACIAL - جمجمه، فک و صورت",
             "SPINE_VERTEBRAE - ستون فقرات و مهره‌ها",
             "PELVIS_ACETABULUM - حلقه لگن و استابولوم",
-            "VASCULAR_CTA_MIP - آنژیوگرافی عروق (3D MIP)",
-            "AIRWAY_BRONCHO - راه‌های هوایی و نای"
+            "VASCULAR_CTA_MIP - آنژیوگرافی عروق (3D MIP)"
         ]
         self.preset_combo.current(0)
         self.preset_combo.pack(fill=tk.X, padx=8, pady=6)
