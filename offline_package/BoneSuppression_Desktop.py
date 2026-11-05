@@ -2146,6 +2146,744 @@ class MedalPacsModal(tk.Toplevel):
                              parent=self)
 
 
+
+# =============================================================================
+# 3D CT Reconstruction Studio Engine & Dialog (Pure OpenCV/NumPy - In-App Embedded)
+# 100% Offline, Native Windows Compatible, Zero External File Import Dependency
+# =============================================================================
+
+PRESETS = {
+    "BONE_TRAUMA": {
+        "title_fa": "استخوان و تروما (ارتوپدی و مفاصل)",
+        "hu_threshold": 92,
+        "upper_threshold": 1000,
+        "smooth_sigma": 0.8,
+        "palette": "WARM_IVORY",
+        "description": "بهینه‌شده برای بررسی شکستگی‌ها، کندگی رباط‌ها و انطباق سطوح مفصلی"
+    },
+    "CRANIOFACIAL": {
+        "title_fa": "جمجمه و فک و صورت (Craniofacial)",
+        "hu_threshold": 110,
+        "upper_threshold": 1200,
+        "smooth_sigma": 0.6,
+        "palette": "PEARL_BONE",
+        "description": "حفظ جزئیات استخوان‌های نازک بینی، کاسه چشم و فک"
+    },
+    "SPINE_VERTEBRAE": {
+        "title_fa": "ستون فقرات و مهره‌ها (Spine)",
+        "hu_threshold": 100,
+        "upper_threshold": 1100,
+        "smooth_sigma": 0.75,
+        "palette": "WARM_IVORY",
+        "description": "نمایش بدنه مهره‌ها، پدیکل، لامینا و انحرافات ستون فقرات"
+    },
+    "PELVIS_ACETABULUM": {
+        "title_fa": "حلقه لگن و استابولوم (Pelvis)",
+        "hu_threshold": 95,
+        "upper_threshold": 1000,
+        "smooth_sigma": 0.9,
+        "palette": "COPPER_BONE",
+        "description": "بررسی ستون قدامی و خلفی استابولوم و مفاصل ساکروایلیاک"
+    },
+    "VASCULAR_CTA_MIP": {
+        "title_fa": "آنژیوگرافی عروق (3D MIP Vascular)",
+        "hu_threshold": 115,
+        "upper_threshold": 450,
+        "smooth_sigma": 0.5,
+        "palette": "ANGIO_RED",
+        "description": "نمایش حداکثر چگالی عروق خونی حاجب، آنوریسم‌ها و تنگی‌ها"
+    },
+    "AIRWAY_BRONCHO": {
+        "title_fa": "راه‌های هوایی و نای (Virtual Airway)",
+        "hu_threshold": 30,
+        "upper_threshold": 75,
+        "smooth_sigma": 1.0,
+        "palette": "AIRWAY_CYAN",
+        "description": "بازسازی فضای هوای داخل نای و مجاری تنفسی"
+    }
+}
+
+
+def get_color_lut(palette_name):
+    """Builds medical color lookup tables for realistic shaded volume rendering."""
+    lut = np.zeros((256, 1, 3), dtype=np.uint8)
+    if palette_name == "WARM_IVORY":
+        # Warm golden ivory (Siemens syngo.via / GE AW bone look)
+        for i in range(256):
+            lut[i, 0, 0] = int(i * 0.70) # B
+            lut[i, 0, 1] = int(i * 0.88) # G
+            lut[i, 0, 2] = int(i * 1.00) # R
+    elif palette_name == "COPPER_BONE":
+        for i in range(256):
+            lut[i, 0, 0] = int(i * 0.55)
+            lut[i, 0, 1] = int(i * 0.75)
+            lut[i, 0, 2] = int(i * 1.00)
+    elif palette_name == "PEARL_BONE":
+        for i in range(256):
+            lut[i, 0, 0] = int(i * 0.82)
+            lut[i, 0, 1] = int(i * 0.92)
+            lut[i, 0, 2] = int(i * 0.98)
+    elif palette_name == "ANGIO_RED":
+        for i in range(256):
+            lut[i, 0, 0] = int(i * 0.20)
+            lut[i, 0, 1] = int(i * 0.45)
+            lut[i, 0, 2] = int(i * 1.00)
+    elif palette_name == "AIRWAY_CYAN":
+        for i in range(256):
+            lut[i, 0, 0] = int(i * 1.00)
+            lut[i, 0, 1] = int(i * 0.85)
+            lut[i, 0, 2] = int(i * 0.30)
+    else:
+        for i in range(256):
+            lut[i, 0, 0] = i
+            lut[i, 0, 1] = i
+            lut[i, 0, 2] = i
+    return lut
+
+
+class Boali3DReconstructor:
+    """Clinical 3D CT Reconstruction Engine for Boali Hospital."""
+
+    def __init__(self, target_resolution=(256, 256)):
+        self.target_res = target_resolution
+        self.volume = None
+        self.volume_iso = None
+        self.slice_thickness = 1.25
+        self.pixel_spacing = 0.5
+
+    def load_series_from_folder(self, folder_path, slice_thickness=1.25, progress_callback=None):
+        """Loads a stack of CT image files (.jpg, .png, or .dcm) and constructs an isotropic 3D volume."""
+        if not os.path.isdir(folder_path):
+            raise FileNotFoundError(f"Folder not found: {folder_path}")
+
+        files = sorted([f for f in os.listdir(folder_path) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.dcm', '.tif'))])
+        if not files:
+            raise ValueError(f"No supported CT image slices found in {folder_path}")
+
+        self.slice_thickness = slice_thickness
+        total_files = len(files)
+        slices = []
+
+        for idx, f in enumerate(files):
+            file_path = os.path.join(folder_path, f)
+            img = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
+            if img is None:
+                try:
+                    import pydicom
+                    ds = pydicom.dcmread(file_path)
+                    img = ds.pixel_array.astype(np.float32)
+                    if hasattr(ds, 'RescaleSlope') and hasattr(ds, 'RescaleIntercept'):
+                        img = img * ds.RescaleSlope + ds.RescaleIntercept
+                    img = np.clip(img, -1000, 1000)
+                    img = ((img + 1000) / 2000.0 * 255.0).astype(np.uint8)
+                except Exception:
+                    continue
+
+            if img is not None:
+                if (img.shape[1], img.shape[0]) != self.target_res:
+                    img = cv2.resize(img, self.target_res, interpolation=cv2.INTER_AREA)
+
+                # Clean outer boundary scanner lines
+                img[:10, :] = 0
+                img[-12:, :] = 0
+                img[:, :10] = 0
+                img[:, -12:] = 0
+                # Zero out scout localizer in bottom-right corner if present
+                h, w = img.shape
+                img[int(h*0.82):, int(w*0.82):] = 0
+
+                slices.append(img)
+
+            if progress_callback and idx % 5 == 0:
+                progress_callback(int((idx / total_files) * 30), f"بارگذاری مقطع {idx+1} از {total_files}...")
+
+        if len(slices) < 5:
+            raise ValueError("At least 5 consecutive CT slices required for 3D reconstruction.")
+
+        self.volume = np.stack(slices, axis=0).astype(np.float32)
+
+        # Pure OpenCV/NumPy Isotropic Resampling along Z-axis
+        z_dim = self.volume.shape[0]
+        z_ratio = max(1.0, (self.slice_thickness / self.pixel_spacing))
+        target_z = min(int(z_dim * z_ratio), 180)
+
+        if progress_callback:
+            progress_callback(40, "درون‌یابی ایزوتروپیک سه‌بعدی وکسل‌ها (Isotropic Resampling)...")
+
+        # Volume is (Z, Y, X). Transpose to (Y, Z, X) to resize along (Z, X) with cv2.resize
+        vol_t = np.transpose(self.volume, (1, 0, 2))
+        vol_resized_t = np.empty((self.volume.shape[1], target_z, self.volume.shape[2]), dtype=np.float32)
+        for y in range(self.volume.shape[1]):
+            vol_resized_t[y] = cv2.resize(vol_t[y], (self.volume.shape[2], target_z), interpolation=cv2.INTER_LINEAR)
+        self.volume_iso = np.transpose(vol_resized_t, (1, 0, 2))
+
+        # Smart Table / Scanner Bed Removal
+        self._remove_scanner_couch()
+
+        if progress_callback:
+            progress_callback(50, "حذف خودکار تخت معاینه و تفکیک بافت‌ها...")
+
+        return self.volume_iso.shape
+
+    def _remove_scanner_couch(self):
+        """Detaches and zeroes out flat scanner cradle/bed pixels at bottom of volume."""
+        if self.volume_iso is None:
+            return
+        z_dim, y_dim, x_dim = self.volume_iso.shape
+        table_region_y = int(y_dim * 0.86)
+        mask_table = (self.volume_iso[:, table_region_y:, :] > 100)
+        col_sums = np.sum(mask_table, axis=1) # (Z, X)
+        flat_table_line = col_sums > 6
+        for z in range(z_dim):
+            for x in range(x_dim):
+                if flat_table_line[z, x]:
+                    self.volume_iso[z, table_region_y:, x] = 0.0
+
+    def render_shaded_view(self, angle_deg=0.0, preset_key="BONE_TRAUMA", light_dir=None):
+        """Renders one high-quality shaded 3D perspective at given rotation angle using fast OpenCV routines."""
+        if self.volume_iso is None:
+            raise ValueError("No volume loaded. Call load_series_from_folder first.")
+
+        preset = PRESETS.get(preset_key, PRESETS["BONE_TRAUMA"])
+        threshold = preset["hu_threshold"]
+
+        # Fast Gaussian blur on each slice using OpenCV
+        vol_smooth = np.empty_like(self.volume_iso)
+        for z in range(self.volume_iso.shape[0]):
+            vol_smooth[z] = cv2.GaussianBlur(self.volume_iso[z], (5, 5), 0.8)
+
+        # Fast 3D rotation around Z-axis using cv2.warpAffine
+        if angle_deg != 0.0:
+            h, w = self.volume_iso.shape[1], self.volume_iso.shape[2]
+            center = (w / 2.0, h / 2.0)
+            M = cv2.getRotationMatrix2D(center, angle_deg, 1.0)
+            rot = np.empty_like(vol_smooth)
+            for z in range(vol_smooth.shape[0]):
+                rot[z] = cv2.warpAffine(vol_smooth[z], M, (w, h), flags=cv2.INTER_LINEAR,
+                                        borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        else:
+            rot = vol_smooth
+
+        if light_dir is None:
+            L = np.array([0.4, 0.8, -0.4])
+        else:
+            L = np.array(light_dir)
+        L = L / np.linalg.norm(L)
+
+        # Surface ray-casting along ray axis 1 (anterior-posterior depth)
+        mask = rot > threshold
+        hit = np.any(mask, axis=1)
+        if not np.any(hit):
+            return np.zeros((rot.shape[0], rot.shape[2], 3), dtype=np.uint8)
+
+        depth = np.argmax(mask, axis=1).astype(np.float32)
+        depth = cv2.GaussianBlur(depth, (5, 5), 1.0)
+
+        # Surface normal from 2D depth gradients
+        dz, dx = np.gradient(depth)
+        nx = -dx
+        ny = np.ones_like(depth) * 2.2
+        nz = -dz
+        norm = np.sqrt(nx**2 + ny**2 + nz**2) + 1e-6
+        nx, ny, nz = nx/norm, ny/norm, nz/norm
+
+        # Blinn-Phong lighting: Diffuse + Specular
+        diffuse = np.maximum(0, nx*L[0] + ny*L[1] + nz*L[2])
+        H = L + np.array([0, 1.0, 0])
+        H = H / np.linalg.norm(H)
+        specular = np.maximum(0, nx*H[0] + ny*H[1] + nz*H[2])**16
+
+        intensity = (0.28 + 0.62 * diffuse + 0.22 * specular) * hit
+        intensity = np.clip(intensity * 255.0, 0, 255).astype(np.uint8)
+
+        # Apply anatomical LUT
+        lut = get_color_lut(preset["palette"])
+        color_view = cv2.LUT(cv2.cvtColor(intensity, cv2.COLOR_GRAY2BGR), lut)
+
+        # Medical annotation overlay
+        cv2.putText(color_view, f"3D VR {int(angle_deg)} deg | {preset_key}", (8, 22), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 255), 1)
+
+        return color_view
+
+    def render_mip_view(self, angle_deg=0.0, preset_key="VASCULAR_CTA_MIP"):
+        """Renders 3D Maximum Intensity Projection (MIP) for CT Angiography."""
+        if self.volume_iso is None:
+            raise ValueError("No volume loaded.")
+
+        preset = PRESETS.get(preset_key, PRESETS["VASCULAR_CTA_MIP"])
+        threshold = preset["hu_threshold"]
+
+        if angle_deg != 0.0:
+            h, w = self.volume_iso.shape[1], self.volume_iso.shape[2]
+            center = (w / 2.0, h / 2.0)
+            M = cv2.getRotationMatrix2D(center, angle_deg, 1.0)
+            rot = np.empty_like(self.volume_iso)
+            for z in range(self.volume_iso.shape[0]):
+                rot[z] = cv2.warpAffine(self.volume_iso[z], M, (w, h), flags=cv2.INTER_LINEAR,
+                                        borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        else:
+            rot = self.volume_iso
+
+        vessels = np.where(rot > threshold, rot, 0.0)
+        mip = np.max(vessels, axis=1)
+        mip_norm = cv2.normalize(mip, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+
+        lut = get_color_lut(preset["palette"])
+        color_view = cv2.LUT(cv2.cvtColor(mip_norm, cv2.COLOR_GRAY2BGR), lut)
+
+        cv2.putText(color_view, f"3D MIP {int(angle_deg)} deg | {preset_key}", (8, 22), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 255), 1)
+        return color_view
+
+    def generate_full_360_cine(self, output_dir, num_frames=24, preset_key="BONE_TRAUMA", progress_callback=None):
+        """Renders a complete 360-degree rotating cine series and saves all frames."""
+        os.makedirs(output_dir, exist_ok=True)
+        angles = np.linspace(0, 360, num_frames, endpoint=False)
+        frame_paths = []
+
+        is_mip = (preset_key == "VASCULAR_CTA_MIP")
+
+        for idx, ang in enumerate(angles):
+            if is_mip:
+                frame = self.render_mip_view(ang, preset_key)
+            else:
+                frame = self.render_shaded_view(ang, preset_key)
+
+            frame_filename = f"3D_frame_{idx+1:03d}_{int(ang)}deg.jpg"
+            frame_full_path = os.path.join(output_dir, frame_filename)
+            cv2.imwrite(frame_full_path, frame)
+            frame_paths.append(frame_full_path)
+
+            if progress_callback:
+                pct = 50 + int(((idx + 1) / num_frames) * 45)
+                progress_callback(pct, f"رندر فریم ۳D چرخشی {idx+1} از {num_frames} ({int(ang)} درجه)...")
+
+        # Save standard orthogonal key clinical snapshots
+        self.save_orthogonal_snapshots(output_dir, preset_key)
+
+        if progress_callback:
+            progress_callback(100, "تکمیل بازسازی ۳D و ذخیره سری چرخشی ۳۶۰ درجه.")
+
+        return frame_paths
+
+    def save_orthogonal_snapshots(self, output_dir, preset_key="BONE_TRAUMA"):
+        """Saves AP (0°), Lateral (90°), Posterior (180°), and Oblique (45°) high-res snapshots."""
+        os.makedirs(output_dir, exist_ok=True)
+        key_angles = [("AP", 0), ("OBLIQUE", 45), ("LATERAL", 90), ("POSTERIOR", 180)]
+        for label, ang in key_angles:
+            view = self.render_shaded_view(ang, preset_key)
+            cv2.imwrite(os.path.join(output_dir, f"KEY_3D_{label}.jpg"), view)
+
+    def export_stl_mesh(self, output_stl_path, threshold=95):
+        """Exports 3D surface mesh as an STL file for 3D printing of bone/fracture (optional)."""
+        if self.volume_iso is None:
+            raise ValueError("No volume loaded.")
+        try:
+            from skimage import measure
+            import trimesh
+            vol_smooth = np.empty_like(self.volume_iso)
+            for z in range(self.volume_iso.shape[0]):
+                vol_smooth[z] = cv2.GaussianBlur(self.volume_iso[z], (5, 5), 0.8)
+            verts, faces, normals, values = measure.marching_cubes(vol_smooth, threshold, spacing=(1.0, 1.0, 1.0))
+            mesh = trimesh.Trimesh(vertices=verts, faces=faces, vertex_normals=normals)
+            mesh.export(output_stl_path)
+            return len(verts), len(faces)
+        except ImportError:
+            raise ImportError("برای خروجی فایل STL پرینتر سه‌بعدی، پکیج‌های scikit-image و trimesh مورد نیاز است.")
+
+
+class Boali3DCTStudioDialog(tk.Toplevel):
+    """Clinical 3D CT Reconstruction Studio Window."""
+
+    def __init__(self, parent, default_folder=None, report_callback=None):
+        super().__init__(parent)
+        self.title("استودیوی بازسازی سه‌بعدی سی‌تی اسکن | نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی (v3.0.0)")
+        self.geometry("1180x780")
+        self.minsize(1000, 680)
+        self.configure(bg=C_CANVAS)
+
+        self.engine = Boali3DReconstructor(target_resolution=(256, 256))
+        self.default_folder = default_folder
+        self.report_callback = report_callback
+
+        self.loaded_slices_count = 0
+        self.cine_frames = []
+        self.current_frame_idx = 0
+        self.is_processing = False
+
+        self._build_ui()
+
+        if self.default_folder and os.path.exists(self.default_folder):
+            self.folder_var.set(self.default_folder)
+            self._start_reconstruction_thread()
+
+    def _build_ui(self):
+        # 1. Top Header
+        top_bar = tk.Frame(self, bg=C_HEADER, height=54, highlightthickness=1, highlightbackground=C_BORDER)
+        top_bar.pack(fill=tk.X, side=tk.TOP)
+
+        lbl_brand = tk.Label(
+            top_bar,
+            text="🏥 نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی | ماژول بازسازی سه‌بعدی سی‌تی اسکن (v3.0.0)",
+            font=("Vazirmatn", 11, "bold"),
+            fg=C_CYAN,
+            bg=C_HEADER
+        )
+        lbl_brand.pack(side=tk.RIGHT, padx=16, pady=10)
+
+        lbl_sub = tk.Label(
+            top_bar,
+            text="3D Volume Rendering & Multi-Organ Clinical CT Studio",
+            font=("Arial", 9),
+            fg=C_TEXT_MUTED,
+            bg=C_HEADER
+        )
+        lbl_sub.pack(side=tk.LEFT, padx=16, pady=10)
+
+        # 2. Main Content Splitter (Left Controls, Right 3D Viewer)
+        main_frame = tk.Frame(self, bg=C_CANVAS)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=10)
+
+        # --- LEFT CONTROLS PANEL ---
+        left_panel = tk.Frame(main_frame, bg=C_CARD, width=380, highlightthickness=1, highlightbackground=C_BORDER)
+        left_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+        left_panel.pack_propagate(False)
+
+        # Title
+        tk.Label(
+            left_panel,
+            text="⚙️ تنظیمات بازسازی و پریست آناتومیک",
+            font=("Vazirmatn", 10, "bold"),
+            fg=C_TEXT_LIGHT,
+            bg=C_CARD
+        ).pack(anchor=tk.E, padx=14, pady=(12, 6))
+
+        # Folder Input
+        f_box = tk.LabelFrame(left_panel, text="پوشه مقاطع سی‌تی اسکن (DICOM / Images)", font=("Vazirmatn", 8, "bold"),
+                              fg=C_CYAN, bg=C_CARD, labelanchor="ne")
+        f_box.pack(fill=tk.X, padx=12, pady=6)
+
+        self.folder_var = tk.StringVar(value="")
+        entry_f = tk.Entry(f_box, textvariable=self.folder_var, font=("Arial", 8), bg=C_CANVAS, fg=C_TEXT_LIGHT, insertbackground="white")
+        entry_f.pack(fill=tk.X, padx=8, pady=(4, 2))
+
+        btn_browse = tk.Button(
+            f_box,
+            text="📂 انتخاب پوشه اسلایس‌ها...",
+            font=("Vazirmatn", 8),
+            bg=C_BORDER,
+            fg=C_TEXT_LIGHT,
+            relief=tk.FLAT,
+            command=self._browse_folder
+        )
+        btn_browse.pack(fill=tk.X, padx=8, pady=(2, 6))
+
+        # Preset Selector
+        p_box = tk.LabelFrame(left_panel, text="پریست تخصصی ارگان (Clinical Preset)", font=("Vazirmatn", 8, "bold"),
+                              fg=C_CYAN, bg=C_CARD, labelanchor="ne")
+        p_box.pack(fill=tk.X, padx=12, pady=6)
+
+        self.preset_var = tk.StringVar(value="BONE_TRAUMA")
+        self.preset_combo = ttk.Combobox(
+            p_box,
+            textvariable=self.preset_var,
+            state="readonly",
+            font=("Vazirmatn", 8)
+        )
+        self.preset_combo["values"] = [
+            "BONE_TRAUMA - استخوان و تروما (ارتوپدی و مفاصل)",
+            "CRANIOFACIAL - جمجمه، فک و صورت",
+            "SPINE_VERTEBRAE - ستون فقرات و مهره‌ها",
+            "PELVIS_ACETABULUM - حلقه لگن و استابولوم",
+            "VASCULAR_CTA_MIP - آنژیوگرافی عروق (3D MIP)",
+            "AIRWAY_BRONCHO - راه‌های هوایی و نای"
+        ]
+        self.preset_combo.current(0)
+        self.preset_combo.pack(fill=tk.X, padx=8, pady=6)
+        self.preset_combo.bind("<<ComboboxSelected>>", self._on_preset_change)
+
+        self.lbl_desc = tk.Label(p_box, text=PRESETS["BONE_TRAUMA"]["description"], font=("Vazirmatn", 7),
+                                 fg=C_TEXT_MUTED, bg=C_CARD, wraplength=340, justify=tk.RIGHT)
+        self.lbl_desc.pack(fill=tk.X, padx=8, pady=(0, 6))
+
+        # Density Threshold Slider
+        th_box = tk.LabelFrame(left_panel, text="آستانه دانسیته هانسفیلد (HU / Threshold)", font=("Vazirmatn", 8, "bold"),
+                               fg=C_CYAN, bg=C_CARD, labelanchor="ne")
+        th_box.pack(fill=tk.X, padx=12, pady=6)
+
+        self.threshold_var = tk.IntVar(value=PRESETS["BONE_TRAUMA"]["hu_threshold"])
+        self.lbl_th_val = tk.Label(th_box, text=f"مقدار فعلی: {self.threshold_var.get()}", font=("Vazirmatn", 8),
+                                   fg=C_TEXT_LIGHT, bg=C_CARD)
+        self.lbl_th_val.pack(anchor=tk.E, padx=8, pady=(2, 0))
+
+        scale_th = ttk.Scale(th_box, from_=40, to_=220, variable=self.threshold_var, orient=tk.HORIZONTAL,
+                             command=lambda v: self.lbl_th_val.config(text=f"مقدار فعلی: {int(float(v))}"))
+        scale_th.pack(fill=tk.X, padx=8, pady=4)
+
+        # Cine Frames Count
+        c_box = tk.LabelFrame(left_panel, text="تعداد فریم‌های چرخش ۳۶۰ درجه", font=("Vazirmatn", 8, "bold"),
+                              fg=C_CYAN, bg=C_CARD, labelanchor="ne")
+        c_box.pack(fill=tk.X, padx=12, pady=6)
+
+        self.frames_var = tk.IntVar(value=24)
+        r_frame = tk.Frame(c_box, bg=C_CARD)
+        r_frame.pack(fill=tk.X, padx=8, pady=4)
+        tk.Radiobutton(r_frame, text="۱۲ فریم (سریع)", variable=self.frames_var, value=12, bg=C_CARD, fg=C_TEXT_LIGHT, selectcolor=C_CANVAS, font=("Vazirmatn", 8)).pack(side=tk.RIGHT, padx=4)
+        tk.Radiobutton(r_frame, text="۲۴ فریم (استاندارد)", variable=self.frames_var, value=24, bg=C_CARD, fg=C_TEXT_LIGHT, selectcolor=C_CANVAS, font=("Vazirmatn", 8)).pack(side=tk.RIGHT, padx=4)
+        tk.Radiobutton(r_frame, text="۳۶ فریم (روان)", variable=self.frames_var, value=36, bg=C_CARD, fg=C_TEXT_LIGHT, selectcolor=C_CANVAS, font=("Vazirmatn", 8)).pack(side=tk.RIGHT, padx=4)
+
+        # Action Button: Generate 3D
+        self.btn_run = tk.Button(
+            left_panel,
+            text="🚀 شروع بازسازی ۳D و تولید سری چرخشی",
+            font=("Vazirmatn", 10, "bold"),
+            bg=C_BLUE,
+            fg="white",
+            relief=tk.FLAT,
+            command=self._start_reconstruction_thread
+        )
+        self.btn_run.pack(fill=tk.X, padx=12, pady=(12, 6))
+
+        # Progress
+        self.progress_bar = ttk.Progressbar(left_panel, mode="determinate")
+        self.progress_bar.pack(fill=tk.X, padx=12, pady=4)
+
+        self.lbl_status = tk.Label(left_panel, text="آماده دریافت مقاطع سی‌تی اسکن...", font=("Vazirmatn", 8),
+                                   fg=C_TEXT_MUTED, bg=C_CARD)
+        self.lbl_status.pack(fill=tk.X, padx=12, pady=2)
+
+        # --- RIGHT INTERACTIVE 3D VIEWER ---
+        right_panel = tk.Frame(main_frame, bg=C_CARD, highlightthickness=1, highlightbackground=C_BORDER)
+        right_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Viewer Header Bar
+        v_head = tk.Frame(right_panel, bg=C_HEADER, height=36)
+        v_head.pack(fill=tk.X, side=tk.TOP)
+
+        self.lbl_angle = tk.Label(
+            v_head,
+            text="زاویه دید: ۰ درجه (نمای قدامی AP)",
+            font=("Vazirmatn", 9, "bold"),
+            fg=C_CYAN,
+            bg=C_HEADER
+        )
+        self.lbl_angle.pack(side=tk.RIGHT, padx=12, pady=6)
+
+        lbl_hint = tk.Label(
+            v_head,
+            text="💡 برای چرخش ۳۶۰ درجه، اسکرول موس را روی تصویر بچرخانید",
+            font=("Vazirmatn", 8),
+            fg=C_TEXT_MUTED,
+            bg=C_HEADER
+        )
+        lbl_hint.pack(side=tk.LEFT, padx=12, pady=6)
+
+        # Canvas for 3D Image Display
+        self.canvas_3d = tk.Label(right_panel, bg=C_CANVAS)
+        self.canvas_3d.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+        self.canvas_3d.bind("<MouseWheel>", self._on_mouse_wheel)
+        self.canvas_3d.bind("<Button-4>", lambda e: self._step_frame(-1)) # Linux scroll up
+        self.canvas_3d.bind("<Button-5>", lambda e: self._step_frame(1))  # Linux scroll down
+
+        # Bottom Slider for 360 degree rotation
+        slider_frame = tk.Frame(right_panel, bg=C_HEADER, height=44)
+        slider_frame.pack(fill=tk.X, side=tk.BOTTOM)
+
+        tk.Label(slider_frame, text="چرخش ۳۶۰°:", font=("Vazirmatn", 8, "bold"), fg=C_TEXT_LIGHT, bg=C_HEADER).pack(side=tk.RIGHT, padx=(8, 4), pady=8)
+
+        self.slider_rot = ttk.Scale(slider_frame, from_=0, to=100, orient=tk.HORIZONTAL, command=self._on_slider_scroll)
+        self.slider_rot.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=8, pady=8)
+
+        # Bottom Export Actions
+        export_bar = tk.Frame(right_panel, bg=C_CARD, height=42)
+        export_bar.pack(fill=tk.X, side=tk.BOTTOM, padx=8, pady=4)
+
+        btn_report = tk.Button(
+            export_bar,
+            text="📋 افزودن به گزارش بالینی بیمار",
+            font=("Vazirmatn", 8, "bold"),
+            bg=C_GREEN,
+            fg="white",
+            relief=tk.FLAT,
+            command=self._export_to_report
+        )
+        btn_report.pack(side=tk.RIGHT, padx=6)
+
+        btn_cine_save = tk.Button(
+            export_bar,
+            text="💾 ذخیره سری چرخشی در پکس / دیسک",
+            font=("Vazirmatn", 8),
+            bg=C_BORDER,
+            fg=C_TEXT_LIGHT,
+            relief=tk.FLAT,
+            command=self._save_cine_series
+        )
+        btn_cine_save.pack(side=tk.RIGHT, padx=6)
+
+        btn_stl = tk.Button(
+            export_bar,
+            text="🖨️ خروجی پرینتر سه‌بعدی ارتوپدی (.STL)",
+            font=("Vazirmatn", 8),
+            bg=C_BORDER,
+            fg=C_TEXT_LIGHT,
+            relief=tk.FLAT,
+            command=self._export_stl
+        )
+        btn_stl.pack(side=tk.RIGHT, padx=6)
+
+    def _browse_folder(self):
+        d = filedialog.askdirectory(title="انتخاب پوشه مقاطع سی‌تی اسکن")
+        if d:
+            self.folder_var.set(d)
+
+    def _on_preset_change(self, event=None):
+        val = self.preset_var.get()
+        p_key = val.split(" - ")[0].strip()
+        if p_key in PRESETS:
+            preset = PRESETS[p_key]
+            self.lbl_desc.config(text=preset["description"])
+            self.threshold_var.set(preset["hu_threshold"])
+            self.lbl_th_val.config(text=f"مقدار فعلی: {preset['hu_threshold']}")
+
+    def _start_reconstruction_thread(self):
+        if self.is_processing:
+            return
+        folder = self.folder_var.get().strip()
+        if not folder or not os.path.exists(folder):
+            messagebox.showwarning("خطا", "لطفاً ابتدا یک پوشه معتبر حاوی مقاطع سی‌تی اسکن را انتخاب کنید.")
+            return
+
+        self.is_processing = True
+        self.btn_run.config(state=tk.DISABLED, bg=C_BORDER)
+        self.progress_bar["value"] = 5
+        self.lbl_status.config(text="در حال بارگذاری مقاطع سی‌تی اسکن...")
+
+        threading.Thread(target=self._run_reconstruction, daemon=True).start()
+
+    def _run_reconstruction(self):
+        try:
+            folder = self.folder_var.get().strip()
+            val = self.preset_var.get()
+            preset_key = val.split(" - ")[0].strip()
+            num_frames = self.frames_var.get()
+            th = self.threshold_var.get()
+            PRESETS[preset_key]["hu_threshold"] = th
+
+            def progress_cb(pct, msg):
+                self.after(0, lambda: self._update_progress(pct, msg))
+
+            # 1. Load slices & resample
+            self.engine.load_series_from_folder(folder, slice_thickness=1.25, progress_callback=progress_cb)
+
+            # 2. Render 360 degree cine
+            out_cine_dir = os.path.join(folder, "Boali_3D_Cine_Series")
+            frame_paths = self.engine.generate_full_360_cine(out_cine_dir, num_frames=num_frames,
+                                                            preset_key=preset_key, progress_callback=progress_cb)
+
+            self.cine_frames = [cv2.imread(p) for p in frame_paths if os.path.exists(p)]
+
+            self.after(0, self._on_reconstruction_done)
+        except Exception as e:
+            err_msg = str(e)
+            self.after(0, lambda: self._on_reconstruction_error(err_msg))
+
+    def _update_progress(self, pct, msg):
+        self.progress_bar["value"] = pct
+        self.lbl_status.config(text=msg)
+
+    def _on_reconstruction_done(self):
+        self.is_processing = False
+        self.btn_run.config(state=tk.NORMAL, bg=C_BLUE)
+        self.lbl_status.config(text="✓ بازسازی سه‌بعدی با موفقیت انجام شد.")
+        if self.cine_frames:
+            self.slider_rot.config(from_=0, to=len(self.cine_frames)-1)
+            self.slider_rot.set(0)
+            self._display_frame(0)
+
+    def _on_reconstruction_error(self, err_msg):
+        self.is_processing = False
+        self.btn_run.config(state=tk.NORMAL, bg=C_BLUE)
+        self.lbl_status.config(text="خطا در بازسازی ۳D")
+        messagebox.showerror("خطا در بازسازی سه‌بعدی", f"عملیات با خطا مواجه شد:\n{err_msg}")
+
+    def _display_frame(self, idx):
+        if not self.cine_frames:
+            return
+        idx = max(0, min(idx, len(self.cine_frames) - 1))
+        self.current_frame_idx = idx
+
+        total = len(self.cine_frames)
+        ang = int((idx / total) * 360)
+        direction_name = "قدامی (AP)" if ang < 25 or ang > 335 else ("مایل (Oblique)" if ang < 75 or ang > 285 else ("جانبی (Lateral)" if ang < 115 or ang > 245 else "خلفی (Posterior)"))
+        self.lbl_angle.config(text=f"زاویه دید: {ang} درجه | نمای {direction_name}")
+
+        frame_bgr = self.cine_frames[idx]
+        h, w = frame_bgr.shape[:2]
+        # Resize to fit canvas
+        canvas_h = self.canvas_3d.winfo_height() or 460
+        canvas_w = self.canvas_3d.winfo_width() or 460
+        scale = min(canvas_w / w, canvas_h / h, 2.0)
+        nw, nh = int(w * scale), int(h * scale)
+        res = cv2.resize(frame_bgr, (nw, nh), interpolation=cv2.INTER_LINEAR)
+
+        rgb = cv2.cvtColor(res, cv2.COLOR_BGR2RGB)
+        im_pil = Image.fromarray(rgb)
+        self.tk_photo = ImageTk.PhotoImage(im_pil)
+        self.canvas_3d.config(image=self.tk_photo)
+
+    def _on_mouse_wheel(self, event):
+        if event.delta > 0:
+            self._step_frame(-1)
+        else:
+            self._step_frame(1)
+
+    def _step_frame(self, step):
+        if not self.cine_frames:
+            return
+        total = len(self.cine_frames)
+        new_idx = (self.current_frame_idx + step) % total
+        self.slider_rot.set(new_idx)
+        self._display_frame(new_idx)
+
+    def _on_slider_scroll(self, val):
+        idx = int(float(val))
+        self._display_frame(idx)
+
+    def _export_to_report(self):
+        if not self.cine_frames:
+            messagebox.showwarning("هشدار", "ابتدا مدل سه‌بعدی را بازسازی کنید.")
+            return
+        if self.report_callback:
+            self.report_callback(self.cine_frames[self.current_frame_idx])
+            messagebox.showinfo("موفقیت", "تصویر نمای سه‌بعدی فعلی با موفقیت به مستندات گزارش بالینی بیمار افزوده شد.")
+        else:
+            messagebox.showinfo("موفقیت", "تصاویر ارتوگونال ۳D در پوشه پروژه ذخیره شدند و آماده استفاده در گزارش Word و PDF هستند.")
+
+    def _save_cine_series(self):
+        if not self.cine_frames:
+            messagebox.showwarning("هشدار", "هنوز فریم سه‌بعدی تولید نشده است.")
+            return
+        d = filedialog.askdirectory(title="انتخاب مسیر ذخیره سری چرخشی ۳D")
+        if d:
+            for idx, f in enumerate(self.cine_frames):
+                cv2.imwrite(os.path.join(d, f"Boali_3D_Cine_{idx+1:03d}.jpg"), f)
+            messagebox.showinfo("ذخیره موفق", f"تمام {len(self.cine_frames)} فریم سه‌بعدی چرخشی با موفقیت در مسیر زیر ذخیره شدند:\n{d}")
+
+    def _export_stl(self):
+        if self.engine.volume_iso is None:
+            messagebox.showwarning("هشدار", "ابتدا مقاطع سی‌تی اسکن را بارگذاری کنید.")
+            return
+        f = filedialog.asksaveasfilename(title="ذخیره فایل مش سه‌بعدی ارتوپدی", defaultextension=".stl",
+                                         filetypes=[("STL 3D Mesh", "*.stl")])
+        if f:
+            try:
+                v, fc = self.engine.export_stl_mesh(f, threshold=self.threshold_var.get())
+                messagebox.showinfo("خروجی پرینتر ۳D", f"فایل مش سه‌بعدی با موفقیت استخراج شد:\nتعداد راس‌ها: {v}\nتعداد مثلث‌ها: {fc}\nمسیر: {f}")
+            except Exception as e:
+                messagebox.showerror("خطا", f"خطا در ایجاد فایل STL:\n{e}")
+
+
 class BoneSuppressionApp(tk.Tk):
     """BoneSuppression AI Desktop Workstation with integrated multi-AI suites, 3D CT reconstruction, and dockable sidebar."""
     def __init__(self):
@@ -2514,7 +3252,7 @@ class BoneSuppressionApp(tk.Tk):
         self.canvas.bind("<B2-Motion>", self.on_pan_drag)
 
         # Specialized Radiology Sidebar Frame
-        self.sidebar_frame = tk.Frame(self.work_area, bg=C_CARD, width=340, bd=1, relief=tk.SOLID,
+        self.sidebar_frame = tk.Frame(self.work_area, bg=C_CARD, width=390, bd=1, relief=tk.SOLID,
                                       highlightbackground=C_BORDER, highlightthickness=1)
         self.sidebar_frame.pack(side=tk.RIGHT, fill=tk.Y, expand=False)
         self.sidebar_frame.pack_propagate(False)
@@ -2546,57 +3284,113 @@ class BoneSuppressionApp(tk.Tk):
         self.status_label.pack(side=tk.RIGHT, padx=14, pady=6)
 
     def init_sidebar_content(self):
-        # Header of Sidebar
-        sb_head = tk.Frame(self.sidebar_frame, bg=C_TOOLBAR, height=40)
+        # 1. Header of Sidebar - Sleek Dark Medical Style
+        sb_head = tk.Frame(self.sidebar_frame, bg=C_HEADER, height=52, bd=1, relief=tk.SOLID,
+                           highlightbackground=C_BORDER, highlightthickness=1)
         sb_head.pack(fill=tk.X)
-        tk.Label(sb_head, text="🩺 جعبه‌ابزار تخصصی هوش مصنوعی", font=("Segoe UI", 10, "bold"),
-                 fg=C_CYAN, bg=C_TOOLBAR).pack(side=tk.LEFT, padx=12, pady=8)
 
-        # Segmented AI Module Selector
-        selector_frame = tk.Frame(self.sidebar_frame, bg=C_CARD, pady=8)
-        selector_frame.pack(fill=tk.X, padx=8)
+        h_content = tk.Frame(sb_head, bg=C_HEADER)
+        h_content.pack(fill=tk.X, padx=12, pady=6)
+
+        tk.Label(h_content, text="🩺 جعبه‌ابزار هوش مصنوعی رادیولوژی", font=("Segoe UI", 10, "bold"),
+                 fg=C_CYAN, bg=C_HEADER).pack(anchor=tk.E)
+        tk.Label(h_content, text="واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی", font=("Segoe UI", 8),
+                 fg=C_TEXT_MUTED, bg=C_HEADER).pack(anchor=tk.E)
+
+        # 2. Segmented AI Module Selector - Modern 2-Row / 2-Column Structured Grid
+        selector_frame = tk.Frame(self.sidebar_frame, bg="#0b111e", pady=8, padx=8, bd=1, relief=tk.SOLID,
+                                  highlightbackground=C_BORDER, highlightthickness=1)
+        selector_frame.pack(fill=tk.X, padx=10, pady=(8, 4))
+
+        tk.Label(selector_frame, text="انتخاب ماژول تخصصی (Clinical AI Suite):", font=("Segoe UI", 8, "bold"),
+                 fg=C_CYAN, bg="#0b111e").pack(anchor=tk.E, padx=4, pady=(0, 6))
+
+        grid_btns = tk.Frame(selector_frame, bg="#0b111e")
+        grid_btns.pack(fill=tk.X)
+        grid_btns.columnconfigure(0, weight=1)
+        grid_btns.columnconfigure(1, weight=1)
 
         self.mod_btns = {}
-        modules = [
-            ("suppress", "🩻 بافت نرم"),
-            ("fracture", "🦴 شکستگی"),
-            ("pathology", "🫁 ۱۸ بیماری & CTR"),
-            ("mammo", "🩺 ماموگرافی"),
-            ("ct3d", "🧊 ۳D سی‌تی"),
+        # Define 5 modules with clinical icons, Persian titles, and active glowing themes
+        modules_cfg = [
+            ("suppress", "🩻 بافت نرم ریه", 0, 0, "#059669"),
+            ("fracture", "🦴 کشف شکستگی", 0, 1, "#d97706"),
+            ("pathology", "🫁 ۱۸ بیماری & CTR", 1, 0, "#7c3aed"),
+            ("mammo", "🩺 ماموگرافی ۴ نمایه", 1, 1, "#db2777"),
+            ("ct3d", "🧊 استودیوی ۳D سی‌تی اسکن", 2, 0, "#0284c7"),
         ]
-        for mod_id, mod_label in modules:
-            b = tk.Button(selector_frame, text=mod_label, font=("Segoe UI", 8, "bold" if mod_id == "suppress" else "normal"),
-                          bg=C_BLUE if mod_id == "suppress" else C_SLATE, fg="white",
-                          activebackground=C_BLUE_HOVER, relief=tk.FLAT, bd=0, padx=4, pady=5, cursor="hand2",
-                          command=lambda m=mod_id: self.select_ai_module(m))
-            b.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=1)
-            self.mod_btns[mod_id] = b
 
-        tk.Frame(self.sidebar_frame, bg=C_BORDER_SUBTLE, height=1).pack(fill=tk.X, padx=8, pady=4)
+        for mod_id, mod_label, r, c, acc_color in modules_cfg:
+            colspan = 2 if mod_id == "ct3d" else 1
+            btn = tk.Button(
+                grid_btns,
+                text=mod_label,
+                font=("Segoe UI", 8, "bold" if mod_id == "suppress" else "normal"),
+                bg=acc_color if mod_id == "suppress" else "#1e293b",
+                fg="white" if mod_id == "suppress" else C_TEXT_LIGHT,
+                activebackground=acc_color,
+                activeforeground="white",
+                relief=tk.FLAT,
+                bd=0,
+                padx=8,
+                pady=7,
+                cursor="hand2",
+                command=lambda m=mod_id: self.select_ai_module(m)
+            )
+            btn.grid(row=r, column=c, columnspan=colspan, sticky="nsew", padx=2, pady=2)
+            self.mod_btns[mod_id] = btn
 
-        # Dynamic Results & Controls Frame
-        self.sb_body = tk.Frame(self.sidebar_frame, bg=C_CARD)
-        self.sb_body.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+        # Divider line
+        tk.Frame(self.sidebar_frame, bg=C_BORDER, height=1).pack(fill=tk.X, padx=10, pady=4)
 
-        # Bottom Clinical Image Adjustments Card
+        # 3. Bottom Clinical Image Adjustments Card (Sleek Collapsible/Docked Card)
         tools_card = tk.Frame(self.sidebar_frame, bg="#0d1424", bd=1, relief=tk.SOLID,
                               highlightbackground=C_BORDER, highlightthickness=1, padx=10, pady=8)
-        tools_card.pack(fill=tk.X, side=tk.BOTTOM, padx=8, pady=8)
+        tools_card.pack(fill=tk.X, side=tk.BOTTOM, padx=10, pady=8)
 
-        tk.Label(tools_card, text="⚙️ تنظیمات نمایش تصویر بالینی:", font=("Segoe UI", 8, "bold"),
-                 fg=C_TEXT_MUTED, bg="#0d1424").pack(anchor=tk.W, pady=(0, 4))
+        t_head = tk.Frame(tools_card, bg="#0d1424")
+        t_head.pack(fill=tk.X, pady=(0, 4))
+        tk.Label(t_head, text="⚙️ تنظیمات نمایش تصویر بالینی", font=("Segoe UI", 8, "bold"),
+                 fg=C_CYAN, bg="#0d1424").pack(side=tk.RIGHT)
 
-        tk.Checkbutton(tools_card, text="بهبود خودکار کنتراست (0.5-99.5%)", variable=self.stretch_var,
+        t_grid = tk.Frame(tools_card, bg="#0d1424")
+        t_grid.pack(fill=tk.X)
+
+        tk.Checkbutton(t_grid, text="🔆 کنتراست خودکار (0.5-99.5%)", variable=self.stretch_var,
                        command=self.render_view, bg="#0d1424", fg=C_TEXT_LIGHT, selectcolor=C_CANVAS,
-                       activebackground="#0d1424", activeforeground=C_CYAN, font=("Segoe UI", 8)).pack(anchor=tk.W)
+                       activebackground="#0d1424", activeforeground=C_CYAN, font=("Segoe UI", 8)).pack(anchor=tk.E, pady=1)
 
-        tk.Checkbutton(tools_card, text="تقویت لبه و استخوان (Edge Boost)", variable=self.edge_boost_var,
+        tk.Checkbutton(t_grid, text="🔍 تقویت لبه و ترابکول استخوان", variable=self.edge_boost_var,
                        command=self.render_view, bg="#0d1424", fg=C_TEXT_LIGHT, selectcolor=C_CANVAS,
-                       activebackground="#0d1424", activeforeground=C_CYAN, font=("Segoe UI", 8)).pack(anchor=tk.W)
+                       activebackground="#0d1424", activeforeground=C_CYAN, font=("Segoe UI", 8)).pack(anchor=tk.E, pady=1)
 
-        tk.Checkbutton(tools_card, text="معکوس‌سازی قطبیت (Invert Polarity)", variable=self.invert_display_var,
+        tk.Checkbutton(t_grid, text="🔄 معکوس‌سازی قطبیت (Invert)", variable=self.invert_display_var,
                        command=self.render_view, bg="#0d1424", fg=C_TEXT_LIGHT, selectcolor=C_CANVAS,
-                       activebackground="#0d1424", activeforeground=C_CYAN, font=("Segoe UI", 8)).pack(anchor=tk.W)
+                       activebackground="#0d1424", activeforeground=C_CYAN, font=("Segoe UI", 8)).pack(anchor=tk.E, pady=1)
+
+        # 4. Smooth Scrollable Container for Dynamic AI Results
+        sb_scroll_wrap = tk.Frame(self.sidebar_frame, bg=C_CARD)
+        sb_scroll_wrap.pack(fill=tk.BOTH, expand=True, padx=8, pady=(2, 4))
+
+        self.sb_canvas = tk.Canvas(sb_scroll_wrap, bg=C_CARD, highlightthickness=0, bd=0)
+        self.sb_scrollbar = ttk.Scrollbar(sb_scroll_wrap, orient="vertical", command=self.sb_canvas.yview)
+        self.sb_body = tk.Frame(self.sb_canvas, bg=C_CARD)
+
+        self.sb_body.bind("<Configure>", lambda e: self.sb_canvas.configure(scrollregion=self.sb_canvas.bbox("all")))
+        self.sb_window_id = self.sb_canvas.create_window((0, 0), window=self.sb_body, anchor="nw", width=365)
+
+        def _on_sb_resize(e):
+            self.sb_canvas.itemconfig(self.sb_window_id, width=e.width)
+        self.sb_canvas.bind("<Configure>", _on_sb_resize)
+
+        def _on_sb_mousewheel(e):
+            self.sb_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        self.sb_canvas.bind("<MouseWheel>", _on_sb_mousewheel)
+        self.sb_body.bind("<MouseWheel>", _on_sb_mousewheel)
+
+        self.sb_canvas.configure(yscrollcommand=self.sb_scrollbar.set)
+        self.sb_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.sb_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         self.refresh_sidebar_ui()
 
@@ -2611,23 +3405,30 @@ class BoneSuppressionApp(tk.Tk):
 
     def select_ai_module(self, mod_id):
         self.active_ai_module.set(mod_id)
+        colors = {
+            "suppress": "#059669",
+            "fracture": "#d97706",
+            "pathology": "#7c3aed",
+            "mammo": "#db2777",
+            "ct3d": "#0284c7"
+        }
         for mid, btn in self.mod_btns.items():
             if mid == mod_id:
-                btn.config(bg=C_BLUE, font=("Segoe UI", 8, "bold"))
+                btn.config(bg=colors.get(mid, C_BLUE), fg="white", font=("Segoe UI", 8, "bold"))
             else:
-                btn.config(bg=C_SLATE, font=("Segoe UI", 8, "normal"))
+                btn.config(bg="#1e293b", fg=C_TEXT_LIGHT, font=("Segoe UI", 8, "normal"))
 
         # Update Main Run Button Text
         if mod_id == "suppress":
-            self.btn_run_active.config(text="⚡ اجرای جداسازی استخوان", bg=C_GREEN, activebackground=C_GREEN_HOVER)
+            self.btn_run_active.config(text="⚡ اجرای جداسازی استخوان (Bone Suppression)", bg=C_GREEN, activebackground=C_GREEN_HOVER)
         elif mod_id == "fracture":
-            self.btn_run_active.config(text="🦴 کشف شکستگی‌ها (Fracture AI)", bg="#d97706", activebackground="#f59e0b")
+            self.btn_run_active.config(text="🦴 کشف هوشمند شکستگی‌ها (Fracture AI)", bg="#d97706", activebackground="#f59e0b")
         elif mod_id == "pathology":
-            self.btn_run_active.config(text="🫁 غربالگری ۱۸ بیماری ریه", bg="#7c3aed", activebackground="#8b5cf6")
+            self.btn_run_active.config(text="🫁 غربالگری ۱۸ بیماری ریه و قلب (DenseNet-18)", bg="#7c3aed", activebackground="#8b5cf6")
         elif mod_id == "mammo":
-            self.btn_run_active.config(text="🩺 آنالیز ماموگرافی ۴ نمایه", bg="#ec4899", activebackground="#db2777")
+            self.btn_run_active.config(text="🩺 آنالیز ماموگرافی ۴ نمایه (BI-RADS AI)", bg="#ec4899", activebackground="#db2777")
         elif mod_id == "ct3d":
-            self.btn_run_active.config(text="🧊 استودیوی ۳D سی‌تی اسکن", bg="#7c3aed", activebackground="#6d28d9")
+            self.btn_run_active.config(text="🧊 استودیوی ۳D سی‌تی اسکن (CT 3D Studio)", bg="#0284c7", activebackground="#0369a1")
 
         self.refresh_sidebar_ui()
         self.render_view()
@@ -2648,55 +3449,119 @@ class BoneSuppressionApp(tk.Tk):
         elif mod == "ct3d":
             self.render_sidebar_ct3d()
 
+        if hasattr(self, "sb_canvas"):
+            self.sb_canvas.yview_moveto(0)
+
     def render_sidebar_ct3d(self):
-        tk.Label(self.sb_body, text="🧊 استودیوی بازسازی سه‌بعدی سی‌تی اسکن (v3.0.0)", font=("Segoe UI", 9, "bold"),
-                 fg=C_CYAN, bg=C_CARD).pack(anchor=tk.W, pady=(4, 2))
-        info_txt = "تبدیل مقاطع خام محوری ۲D سی‌تی اسکن به حجم سه‌بعدی چرخان ۳۶۰ درجه با پریست‌های تخصصی ارتوپدی، جمجمه، ستون فقرات، لگن و آنژیوگرافی عروق."
-        tk.Label(self.sb_body, text=info_txt, font=("Segoe UI", 8), fg=C_TEXT_MUTED, bg=C_CARD,
-                 justify=tk.RIGHT, wraplength=310).pack(anchor=tk.W, pady=(0, 8))
+        head_box = tk.Frame(self.sb_body, bg="#0d1424", bd=1, relief=tk.SOLID,
+                            highlightbackground="#0284c7", highlightthickness=1, padx=8, pady=8)
+        head_box.pack(fill=tk.X, pady=(2, 6))
 
-        btn_launch = tk.Button(self.sb_body, text="🚀 ورود به استودیوی بازسازی ۳D", font=("Segoe UI", 9, "bold"),
-                               bg="#7c3aed", fg="white", activebackground="#6d28d9", relief=tk.FLAT, pady=6, cursor="hand2",
+        tk.Label(head_box, text="🧊 استودیوی بازسازی سه‌بعدی سی‌تی اسکن", font=("Segoe UI", 10, "bold"),
+                 fg="#38bdf8", bg="#0d1424").pack(anchor=tk.E)
+        tk.Label(head_box, text="واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی", font=("Segoe UI", 7),
+                 fg=C_TEXT_MUTED, bg="#0d1424").pack(anchor=tk.E, pady=(0, 4))
+
+        info_txt = "تبدیل مقاطع خام محوری ۲D سی‌تی اسکن به حجم سه‌بعدی چرخان ۳۶۰ درجه با تفکیک خودکار تخت، سایه‌پردازی فونگ و پریست‌های بالینی چند ارگان."
+        tk.Label(head_box, text=info_txt, font=("Segoe UI", 8), fg=C_TEXT_LIGHT, bg="#0d1424",
+                 justify=tk.RIGHT, wraplength=340).pack(anchor=tk.E, pady=(2, 8))
+
+        btn_launch = tk.Button(head_box, text="🚀 ورود به استودیوی بازسازی ۳D", font=("Segoe UI", 10, "bold"),
+                               bg="#0284c7", fg="white", activebackground="#0369a1", activeforeground="white",
+                               relief=tk.FLAT, pady=8, cursor="hand2",
                                command=self.open_3d_ct_studio)
-        btn_launch.pack(fill=tk.X, pady=(4, 6))
+        btn_launch.pack(fill=tk.X, pady=(2, 6))
 
-        btn_pacs_ct = tk.Button(self.sb_body, text="🌐 دریافت سی‌تی اسکن از پکس مدال", font=("Segoe UI", 8),
-                                bg=C_SLATE, fg=C_TEXT_LIGHT, relief=tk.FLAT, pady=4, cursor="hand2",
+        btn_pacs_ct = tk.Button(head_box, text="🌐 دریافت مستقیم سی‌تی اسکن از پکس مدال", font=("Segoe UI", 8, "bold"),
+                                bg="#1e293b", fg="#38bdf8", activebackground="#334155", relief=tk.FLAT, pady=5, cursor="hand2",
                                 command=self.open_pacs_modal)
-        btn_pacs_ct.pack(fill=tk.X, pady=2)
+        btn_pacs_ct.pack(fill=tk.X, pady=(2, 4))
+
+        # Presets Summary Card
+        p_card = tk.LabelFrame(self.sb_body, text=" پریست‌های آناتومیک آماده (Presets) ", font=("Segoe UI", 8, "bold"),
+                               fg=C_CYAN, bg=C_CARD, bd=1, relief=tk.SOLID, labelanchor="ne")
+        p_card.pack(fill=tk.X, pady=4, padx=2)
+
+        presets_list = [
+            ("🦴 استخوان و تروما", "شکستگی‌ها، کندگی رباط‌ها و انطباق سطوح مفصلی"),
+            ("💀 جمجمه، فک و صورت", "استخوان‌های نازک صورت، کاسه چشم و فک"),
+            ("🏛️ ستون فقرات و مهره‌ها", "بدنه مهره‌ها، پدیکل، لامینا و انحرافات"),
+            ("🩻 حلقه لگن و استابولوم", "ستون قدامی/خلفی استابولوم و مفاصل ساکروایلیاک"),
+            ("🩸 آنژیوگرافی عروق (MIP)", "عروق خونی حاجب، آنوریسم‌ها و تنگی‌ها"),
+            ("🫁 راه‌های هوایی و نای", "فضای هوای داخل نای و مجاری تنفسی"),
+        ]
+
+        for p_title, p_desc in presets_list:
+            row = tk.Frame(p_card, bg=C_CARD)
+            row.pack(fill=tk.X, padx=6, pady=2)
+            tk.Label(row, text=p_title, font=("Segoe UI", 8, "bold"), fg=C_TEXT_LIGHT, bg=C_CARD).pack(anchor=tk.E)
+            tk.Label(row, text=p_desc, font=("Segoe UI", 7), fg=C_TEXT_MUTED, bg=C_CARD).pack(anchor=tk.E)
+
+        # Snapshot Status Card
+        snap_box = tk.Frame(self.sb_body, bg="#0d1424", bd=1, relief=tk.SOLID, highlightbackground=C_BORDER, padx=8, pady=6)
+        snap_box.pack(fill=tk.X, pady=6)
+
+        if getattr(self, "last_3d_snapshot", None) is not None:
+            tk.Label(snap_box, text="✓ نمای سه‌بعدی ثبت‌شده در مستندات بالینی موجود است", font=("Segoe UI", 8, "bold"),
+                     fg="#34d399", bg="#0d1424").pack(anchor=tk.E)
+            btn_rep = tk.Button(snap_box, text="📝 مشاهده گزارش بالینی همراه با تصویر ۳D", font=("Segoe UI", 8, "bold"),
+                                bg="#059669", fg="white", activebackground="#047857", relief=tk.FLAT, pady=5, cursor="hand2",
+                                command=self.open_report_dialog)
+            btn_rep.pack(fill=tk.X, pady=(4, 2))
+        else:
+            tk.Label(snap_box, text="ℹ️ هنوز تصویری از استودیوی ۳D به گزارش افزوده نشده است.", font=("Segoe UI", 8),
+                     fg=C_TEXT_MUTED, bg="#0d1424").pack(anchor=tk.E)
 
     def render_sidebar_suppress(self):
-        tk.Label(self.sb_body, text="🩻 ماژول حذف استخوان (Qure.ai)", font=("Segoe UI", 9, "bold"),
-                 fg=C_CYAN, bg=C_CARD).pack(anchor=tk.W, pady=(4, 2))
-        info_txt = "تفکیک بافت نرم ریه از ساختار متراکم استخوانی دنده‌ها و ترقوه جهت آشکارسازی ندول‌های پنهان."
-        tk.Label(self.sb_body, text=info_txt, font=("Segoe UI", 8), fg=C_TEXT_MUTED, bg=C_CARD,
-                 justify=tk.RIGHT, wraplength=310).pack(anchor=tk.W, pady=(0, 8))
+        head_box = tk.Frame(self.sb_body, bg="#0d1424", bd=1, relief=tk.SOLID,
+                            highlightbackground="#059669", highlightthickness=1, padx=8, pady=8)
+        head_box.pack(fill=tk.X, pady=(2, 6))
 
-        status_box = tk.Frame(self.sb_body, bg="#0d1424", bd=1, relief=tk.SOLID, highlightbackground=C_BORDER)
+        tk.Label(head_box, text="🩻 ماژول حذف استخوان (Bone Suppression AI)", font=("Segoe UI", 9, "bold"),
+                 fg="#34d399", bg="#0d1424").pack(anchor=tk.E)
+        info_txt = "تفکیک بافت نرم ریه از ساختار متراکم استخوانی دنده‌ها و ترقوه جهت آشکارسازی ندول‌های پنهان، تراکم‌های رتروکاردیاک و ضایعات آپیکال."
+        tk.Label(head_box, text=info_txt, font=("Segoe UI", 8), fg=C_TEXT_LIGHT, bg="#0d1424",
+                 justify=tk.RIGHT, wraplength=340).pack(anchor=tk.E, pady=(2, 6))
+
+        btn_run = tk.Button(head_box, text="⚡ اجرای جداسازی استخوان (Qure.ai Engine)", font=("Segoe UI", 9, "bold"),
+                            bg="#059669", fg="white", activebackground="#047857", relief=tk.FLAT, pady=7, cursor="hand2",
+                            command=self.run_suppression_inference)
+        btn_run.pack(fill=tk.X, pady=(2, 4))
+
+        status_box = tk.Frame(self.sb_body, bg="#0d1424", bd=1, relief=tk.SOLID, highlightbackground=C_BORDER, padx=8, pady=6)
         status_box.pack(fill=tk.X, pady=4)
         if self.soft_np is not None:
-            tk.Label(status_box, text="✓ پردازش با موفقیت انجام شد", font=("Segoe UI", 8, "bold"), fg="#34d399", bg="#0d1424").pack(padx=8, pady=6)
+            tk.Label(status_box, text="✓ پردازش بافت نرم با موفقیت انجام شد", font=("Segoe UI", 8, "bold"), fg="#34d399", bg="#0d1424").pack(anchor=tk.E)
+            tk.Label(status_box, text="می‌توانید با اسلایدر پایین نماها را مقایسه کنید.", font=("Segoe UI", 7), fg=C_TEXT_MUTED, bg="#0d1424").pack(anchor=tk.E)
         else:
-            tk.Label(status_box, text="منتظر اجرای پردازش با دکمه سبز بالا...", font=("Segoe UI", 8), fg=C_AMBER, bg="#0d1424").pack(padx=8, pady=6)
+            tk.Label(status_box, text="منتظر اجرای پردازش با دکمه سبز بالا...", font=("Segoe UI", 8), fg=C_AMBER, bg="#0d1424").pack(anchor=tk.E)
 
     def render_sidebar_fracture(self):
-        head_box = tk.Frame(self.sb_body, bg=C_CARD)
-        head_box.pack(fill=tk.X, pady=(2, 4))
+        head_box = tk.Frame(self.sb_body, bg="#0d1424", bd=1, relief=tk.SOLID,
+                            highlightbackground="#d97706", highlightthickness=1, padx=8, pady=8)
+        head_box.pack(fill=tk.X, pady=(2, 6))
 
-        tk.Label(head_box, text="🦴 ماژول تخصصی کشف شکستگی (Fracture AI)", font=("Segoe UI", 9, "bold"),
-                 fg="#f59e0b", bg=C_CARD).pack(side=tk.LEFT)
+        h_top = tk.Frame(head_box, bg="#0d1424")
+        h_top.pack(fill=tk.X)
 
-        # Validation metrics button
-        btn_val = tk.Button(head_box, text="📊 دقت بالینی", font=("Segoe UI", 7, "bold"),
+        tk.Label(h_top, text="🦴 کشف شکستگی (Fracture AI)", font=("Segoe UI", 9, "bold"),
+                 fg="#f59e0b", bg="#0d1424").pack(side=tk.RIGHT)
+
+        btn_val = tk.Button(h_top, text="📊 دقت بالینی", font=("Segoe UI", 7, "bold"),
                             bg="#1e293b", fg="#38bdf8", activebackground="#334155", activeforeground="white",
                             bd=1, relief=tk.SOLID, padx=6, pady=1, cursor="hand2",
                             command=lambda: self.show_clinical_validation_dialog("fracture"))
-        btn_val.pack(side=tk.RIGHT)
+        btn_val.pack(side=tk.LEFT)
+
+        btn_run = tk.Button(head_box, text="⚡ شروع اسکن شکستگی و ترک استخوان", font=("Segoe UI", 9, "bold"),
+                            bg="#d97706", fg="white", activebackground="#b45309", relief=tk.FLAT, pady=7, cursor="hand2",
+                            command=self.run_fracture_inference)
+        btn_run.pack(fill=tk.X, pady=(6, 2))
 
         # Anatomy Selection Frame
-        anat_frame = tk.LabelFrame(self.sb_body, text=" 🏷️ انتخاب اندام مورد بررسی (Anatomy) ", font=("Segoe UI", 8, "bold"),
-                                   fg=C_CYAN, bg=C_CARD, bd=1, relief=tk.SOLID)
-        anat_frame.pack(fill=tk.X, pady=(0, 4), padx=2)
+        anat_frame = tk.LabelFrame(self.sb_body, text=" اندام مورد بررسی (Target Anatomy) ", font=("Segoe UI", 8, "bold"),
+                                   fg=C_CYAN, bg=C_CARD, bd=1, relief=tk.SOLID, labelanchor="ne")
+        anat_frame.pack(fill=tk.X, pady=4, padx=2)
 
         options = [
             ("ortho", "🦴 ارتوپدی و اندام‌ها (دست، مچ، ساعد، پا)"),
@@ -2708,16 +3573,16 @@ class BoneSuppressionApp(tk.Tk):
             tk.Radiobutton(anat_frame, text=label, variable=self.fracture_anatomy, value=val,
                            bg=C_CARD, fg=C_TEXT_LIGHT, selectcolor=C_CANVAS,
                            activebackground=C_CARD, activeforeground="#f59e0b",
-                           font=("Segoe UI", 8)).pack(anchor=tk.W, padx=6, pady=1)
+                           font=("Segoe UI", 8)).pack(anchor=tk.E, padx=6, pady=1)
 
         # Sensitivity / Confidence Slider Frame
-        sens_frame = tk.LabelFrame(self.sb_body, text=" 🎚️ حساسیت غربالگری و کشف ترک (Confidence) ",
-                                   font=("Segoe UI", 8, "bold"), fg=C_CYAN, bg=C_CARD, bd=1, relief=tk.SOLID)
-        sens_frame.pack(fill=tk.X, pady=(0, 4), padx=2)
+        sens_frame = tk.LabelFrame(self.sb_body, text=" آستانه حساسیت غربالگری (Confidence) ",
+                                   font=("Segoe UI", 8, "bold"), fg=C_CYAN, bg=C_CARD, bd=1, relief=tk.SOLID, labelanchor="ne")
+        sens_frame.pack(fill=tk.X, pady=4, padx=2)
 
         self.sens_label = tk.Label(sens_frame, text=f"آستانه اطمینان: {self.fracture_conf_var.get():.0%} (غربالگری ظریف)",
                                    font=("Segoe UI", 8), fg="#fbbf24", bg=C_CARD)
-        self.sens_label.pack(anchor=tk.W, padx=6, pady=(2, 0))
+        self.sens_label.pack(anchor=tk.E, padx=6, pady=(2, 0))
 
         def on_slider_change(val):
             v = float(val)
@@ -2736,15 +3601,15 @@ class BoneSuppressionApp(tk.Tk):
 
         # Enhancement checkbuttons
         chk_frame = tk.Frame(self.sb_body, bg=C_CARD)
-        chk_frame.pack(fill=tk.X, pady=(0, 4))
+        chk_frame.pack(fill=tk.X, pady=2)
 
         tk.Checkbutton(chk_frame, text="تقویت ترابکول استخوان (CLAHE)", variable=self.clahe_var,
                        bg=C_CARD, fg=C_TEXT_LIGHT, selectcolor=C_CANVAS,
-                       activebackground=C_CARD, activeforeground=C_AMBER, font=("Segoe UI", 8)).pack(side=tk.LEFT)
+                       activebackground=C_CARD, activeforeground=C_AMBER, font=("Segoe UI", 8)).pack(side=tk.RIGHT)
 
         tk.Checkbutton(chk_frame, text="نمایش کادرها روی تصویر", variable=self.show_fracture_boxes,
                        command=self.render_view, bg=C_CARD, fg=C_TEXT_LIGHT, selectcolor=C_CANVAS,
-                       activebackground=C_CARD, activeforeground=C_AMBER, font=("Segoe UI", 8, "bold")).pack(side=tk.RIGHT)
+                       activebackground=C_CARD, activeforeground=C_AMBER, font=("Segoe UI", 8, "bold")).pack(side=tk.LEFT)
 
         # Results Frame
         results_frame = tk.Frame(self.sb_body, bg="#0d1424", bd=1, relief=tk.SOLID, highlightbackground=C_BORDER)
@@ -2757,7 +3622,7 @@ class BoneSuppressionApp(tk.Tk):
             count = len(self.fracture_findings)
             head_lbl = f"کشف {count} ناحیه مشکوک به شکستگی" if count > 0 else "هیچ شکستگی در این آستانه کشف نشد"
             color = "#ef4444" if count > 0 else "#34d399"
-            tk.Label(results_frame, text=head_lbl, font=("Segoe UI", 9, "bold"), fg=color, bg="#0d1424").pack(anchor=tk.W, padx=8, pady=4)
+            tk.Label(results_frame, text=head_lbl, font=("Segoe UI", 9, "bold"), fg=color, bg="#0d1424").pack(anchor=tk.E, padx=8, pady=4)
 
             for i, f in enumerate(self.fracture_findings, start=1):
                 box = f["box"]
@@ -2766,21 +3631,30 @@ class BoneSuppressionApp(tk.Tk):
                 sev = "شکستگی با جابجایی / قطعی" if conf >= 0.15 else "ترک مویی / شکستگی ظریف"
                 card = tk.Frame(results_frame, bg="#1a1113", bd=1, relief=tk.SOLID, highlightbackground="#dc2626")
                 card.pack(fill=tk.X, padx=6, pady=3)
-                tk.Label(card, text=f"🔴 کادر {i}: {anat} | اطمینان: {conf:.1%}", font=("Segoe UI", 8, "bold"), fg="#fca5a5", bg="#1a1113").pack(anchor=tk.W, padx=6, pady=2)
-                tk.Label(card, text=f"وضعیت: {sev} (مختصات: X=[{box[0]}-{box[2]}], Y=[{box[1]}-{box[3]}])", font=("Segoe UI", 7), fg=C_TEXT_MUTED, bg="#1a1113").pack(anchor=tk.W, padx=6, pady=(0, 4))
+                tk.Label(card, text=f"🔴 کادر {i}: {anat} | اطمینان: {conf:.1%}", font=("Segoe UI", 8, "bold"), fg="#fca5a5", bg="#1a1113").pack(anchor=tk.E, padx=6, pady=2)
+                tk.Label(card, text=f"وضعیت: {sev} (مختصات: X=[{box[0]}-{box[2]}], Y=[{box[1]}-{box[3]}])", font=("Segoe UI", 7), fg=C_TEXT_MUTED, bg="#1a1113").pack(anchor=tk.E, padx=6, pady=(0, 4))
 
     def render_sidebar_pathology(self):
-        head_box = tk.Frame(self.sb_body, bg=C_CARD)
-        head_box.pack(fill=tk.X, pady=(2, 4))
+        head_box = tk.Frame(self.sb_body, bg="#0d1424", bd=1, relief=tk.SOLID,
+                            highlightbackground="#7c3aed", highlightthickness=1, padx=8, pady=8)
+        head_box.pack(fill=tk.X, pady=(2, 6))
 
-        tk.Label(head_box, text="🫁 غربالگری ۱۸ بیماری ریه و قلب", font=("Segoe UI", 9, "bold"),
-                 fg="#a78bfa", bg=C_CARD).pack(side=tk.LEFT)
+        h_top = tk.Frame(head_box, bg="#0d1424")
+        h_top.pack(fill=tk.X)
 
-        btn_val = tk.Button(head_box, text="📊 دقت و AUC", font=("Segoe UI", 7, "bold"),
+        tk.Label(h_top, text="🫁 غربالگری ۱۸ بیماری ریه و قلب", font=("Segoe UI", 9, "bold"),
+                 fg="#a78bfa", bg="#0d1424").pack(side=tk.RIGHT)
+
+        btn_val = tk.Button(h_top, text="📊 دقت و AUC", font=("Segoe UI", 7, "bold"),
                             bg="#1e293b", fg="#c084fc", activebackground="#334155", activeforeground="white",
                             bd=1, relief=tk.SOLID, padx=6, pady=1, cursor="hand2",
                             command=lambda: self.show_clinical_validation_dialog("pathology"))
-        btn_val.pack(side=tk.RIGHT)
+        btn_val.pack(side=tk.LEFT)
+
+        btn_run = tk.Button(head_box, text="⚡ شروع ارزیابی ۱۸ پاتولوژی ریه و سنجش CTR", font=("Segoe UI", 9, "bold"),
+                            bg="#7c3aed", fg="white", activebackground="#6d28d9", relief=tk.FLAT, pady=7, cursor="hand2",
+                            command=self.run_pathology_inference)
+        btn_run.pack(fill=tk.X, pady=(6, 2))
 
         container = tk.Frame(self.sb_body, bg=C_CARD)
         container.pack(fill=tk.BOTH, expand=True)
@@ -2795,29 +3669,10 @@ class BoneSuppressionApp(tk.Tk):
         positives = [p for p in self.pathology_findings if p["is_positive"]]
         summary_lbl = tk.Label(container, text=f"شاخص‌های بالاتر از آستانه بالینی: {len(positives)} از ۱۸",
                                font=("Segoe UI", 8, "bold"), fg="#ef4444" if positives else "#34d399", bg=C_CARD)
-        summary_lbl.pack(anchor=tk.W, pady=(0, 4))
+        summary_lbl.pack(anchor=tk.E, pady=(0, 4))
 
-        # Canvas with smooth MouseWheel scroll
-        canvas = tk.Canvas(container, bg=C_CARD, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
-        scrollable_frame = tk.Frame(canvas, bg=C_CARD)
-
-        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        window_id = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw", width=310)
-
-        def _on_canvas_configure(e):
-            canvas.itemconfig(window_id, width=e.width)
-        canvas.bind("<Configure>", _on_canvas_configure)
-
-        def _on_mousewheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
-        canvas.bind("<MouseWheel>", _on_mousewheel)
-        scrollable_frame.bind("<MouseWheel>", _on_mousewheel)
-
-        canvas.configure(yscrollcommand=scrollbar.set)
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        p_list_frame = tk.Frame(container, bg=C_CARD)
+        p_list_frame.pack(fill=tk.X)
 
         for p in self.pathology_findings:
             is_pos = p["is_positive"]
@@ -2825,29 +3680,24 @@ class BoneSuppressionApp(tk.Tk):
             card_bg = "#211218" if is_pos else "#0f172a"
             card_border = "#dc2626" if is_pos else C_BORDER
 
-            card = tk.Frame(scrollable_frame, bg=card_bg, bd=1, relief=tk.SOLID, highlightbackground=card_border)
+            card = tk.Frame(p_list_frame, bg=card_bg, bd=1, relief=tk.SOLID, highlightbackground=card_border)
             card.pack(fill=tk.X, pady=2, padx=2)
-            card.bind("<MouseWheel>", _on_mousewheel)
 
             head_row = tk.Frame(card, bg=card_bg)
             head_row.pack(fill=tk.X, padx=6, pady=(4, 1))
-            head_row.bind("<MouseWheel>", _on_mousewheel)
 
             badge = "🔴" if is_pos else "⚪"
             lbl1 = tk.Label(head_row, text=f"{badge} {p.get('fa', p.get('name_fa', ''))}", font=("Segoe UI", 8, "bold" if is_pos else "normal"),
                             fg="#fca5a5" if is_pos else C_TEXT_LIGHT, bg=card_bg)
-            lbl1.pack(side=tk.LEFT)
-            lbl1.bind("<MouseWheel>", _on_mousewheel)
+            lbl1.pack(side=tk.RIGHT)
 
             lbl2 = tk.Label(head_row, text=f"{score:.1%}", font=("Consolas", 8, "bold"),
                             fg="#ef4444" if is_pos else C_CYAN, bg=card_bg)
-            lbl2.pack(side=tk.RIGHT)
-            lbl2.bind("<MouseWheel>", _on_mousewheel)
+            lbl2.pack(side=tk.LEFT)
 
             lbl3 = tk.Label(card, text=f"{p.get('en', p.get('key', ''))} | آستانه بالینی: {p['threshold']:.1%}", font=("Segoe UI", 7),
                             fg=C_TEXT_MUTED, bg=card_bg)
-            lbl3.pack(anchor=tk.W, padx=8, pady=(0, 3))
-            lbl3.bind("<MouseWheel>", _on_mousewheel)
+            lbl3.pack(anchor=tk.E, padx=8, pady=(0, 3))
 
         # Cardiothoracic Ratio (CTR) Card
         ctr_val = self.ctr_value or 0.48
@@ -2859,19 +3709,20 @@ class BoneSuppressionApp(tk.Tk):
         c_head = tk.Frame(ctr_card, bg="#0f172a")
         c_head.pack(fill=tk.X)
         tk.Label(c_head, text=f"سنجش CTR (شاخص قلبی): {ctr_val:.1%}", font=("Segoe UI", 9, "bold"),
-                 fg="#ef4444" if is_cardio else "#34d399", bg="#0f172a").pack(side=tk.LEFT)
+                 fg="#ef4444" if is_cardio else "#34d399", bg="#0f172a").pack(side=tk.RIGHT)
         badge_txt = "⚠ کاردیومگالی" if is_cardio else "✓ طبیعی (<50%)"
         tk.Label(c_head, text=badge_txt, font=("Segoe UI", 8, "bold"),
-                 fg="#f87171" if is_cardio else "#10b981", bg="#0f172a").pack(side=tk.RIGHT)
+                 fg="#f87171" if is_cardio else "#10b981", bg="#0f172a").pack(side=tk.LEFT)
 
         tk.Checkbutton(ctr_card, text="نمایش خط‌کش اندازه‌گیری CTR روی کلیشه", variable=self.show_ctr_var,
                        command=self.render_view, bg="#0f172a", fg=C_TEXT_LIGHT, selectcolor=C_CANVAS,
-                       activebackground="#0f172a", activeforeground=C_CYAN, font=("Segoe UI", 8)).pack(anchor=tk.W, pady=(2, 0))
+                       activebackground="#0f172a", activeforeground=C_CYAN, font=("Segoe UI", 8)).pack(anchor=tk.E, pady=(2, 0))
 
         btn_rep = tk.Button(container, text="📝 صدور و مشاهده گزارش قفسه سینه", font=("Segoe UI", 8, "bold"),
                             bg="#8b5cf6", fg="white", activebackground="#7c3aed", activeforeground="white",
                             bd=0, relief=tk.FLAT, pady=6, cursor="hand2", command=self.open_report_dialog)
         btn_rep.pack(fill=tk.X, pady=(4, 2))
+
     # -------------------------------------------------------------------------
     # Multi-Engine Orchestrator
     # -------------------------------------------------------------------------
@@ -3764,7 +4615,6 @@ class BoneSuppressionApp(tk.Tk):
 
     def open_3d_ct_studio(self, folder=None):
         try:
-            from boali_ct_3d_studio_dialog import Boali3DCTStudioDialog
             Boali3DCTStudioDialog(self, default_folder=folder, report_callback=self.on_3d_snapshot_received)
         except Exception as ex:
             messagebox.showerror("خطا در بازسازی ۳D", f"خطا در اجرای استودیوی بازسازی سه‌بعدی سی‌تی اسکن:\n{ex}")

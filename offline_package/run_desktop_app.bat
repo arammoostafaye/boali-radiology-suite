@@ -1,7 +1,14 @@
 @echo off
 chcp 65001 >nul
-title Launch BoneSuppression AI Desktop
+title Launch Boali Radiology Suite AI Desktop v3.0.0
 color 0f
+
+python --version >nul 2>&1
+if %errorlevel% equ 0 (
+    echo [اطلاع] اجرای مستقیم آخرین نسخه پایتون نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی (v3.0.0)...
+    start "" pythonw BoneSuppression_Desktop.py
+    exit /b 0
+)
 
 if exist "BoneSuppressionAI.exe" (
     start "" "BoneSuppressionAI.exe"
@@ -18,11 +25,6 @@ if exist "dist\BoneSuppressionAI\BoneSuppressionAI.exe" (
     exit /b 0
 )
 
-python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [خطا] پایتون یافت نشد. لطفاً ابتدا پایتون را نصب کنید یا فایل اجرایی کامپایل شده را اجرا فرمایید.
-    pause
-    exit /b 1
-)
-
-start "" pythonw BoneSuppression_Desktop.py
+echo [خطا] پایتون یا فایل اجرایی یافت نشد.
+pause
+exit /b 1
