@@ -428,9 +428,9 @@ class Boali3DReconstructor:
 
         # Medical coordinates:
         # X: Right -> Left (verts[:, 2])
-        # Y: Anterior -> Posterior (verts[:, 1])
-        # Z: Inferior -> Superior (verts[:, 0])
-        coords = np.stack([verts[:, 2], verts[:, 0], verts[:, 1]], axis=1) # (X, Z, Y)
+        # Superior (Proximal / Tibia / Head) is at the TOP of the screen
+        # Inferior (Distal / Foot / Caudal) is at the BOTTOM of the screen
+        coords = np.stack([verts[:, 2], -verts[:, 0], verts[:, 1]], axis=1)
         coords_rot = coords @ R.T
 
         # Face vertices & normals
@@ -440,7 +440,7 @@ class Boali3DReconstructor:
         fn /= (np.linalg.norm(fn, axis=1, keepdims=True) + 1e-8)
 
         # Back-Face Culling (looking along +Z depth: normal points towards camera)
-        visible = fn[:, 2] > 0.02
+        visible = fn[:, 2] < -0.02
         vis_faces = faces[visible]
         vis_fn = fn[visible]
         vis_tri = tri_verts[visible]
@@ -450,14 +450,17 @@ class Boali3DReconstructor:
         sort_idx = np.argsort(-depths)
 
         # Blinn-Phong Studio Lighting Setup
-        L_key = np.array([0.45, 0.65, 0.6])
+        L_key = np.array([0.45, -0.65, -0.6])
         L_key /= np.linalg.norm(L_key)
-        L_fill = np.array([-0.5, -0.35, 0.7])
+        L_fill = np.array([-0.5, 0.35, -0.7])
         L_fill /= np.linalg.norm(L_fill)
-        V_cam = np.array([0.0, 0.0, 1.0])
+        V_cam = np.array([0.0, 0.0, -1.0])
         H_vec = (L_key + V_cam) / np.linalg.norm(L_key + V_cam)
 
-        diffuse = np.maximum(0.0, np.sum(vis_fn * L_key, axis=1))
+        diffuse = np.maximum(0.0, np.sum(vis_fn * -L_key, axis=1))
+        fill = np.maximum(0.0, np.sum(vis_fn * -L_fill, axis=1))
+        specular = np.maximum(0.0, np.sum(vis_fn * -H_vec, axis=1))**24
+        rim = (1.0 - np.abs(vis_fn[:, 2]))**2.2
         fill = np.maximum(0.0, np.sum(vis_fn * L_fill, axis=1))
         specular = np.maximum(0.0, np.sum(vis_fn * H_vec, axis=1))**24
         rim = (1.0 - np.abs(vis_fn[:, 2]))**2.2
