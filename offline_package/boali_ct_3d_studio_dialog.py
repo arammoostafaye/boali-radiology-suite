@@ -268,6 +268,8 @@ class Boali3DCTStudioDialog(tk.Toplevel):
         self.canvas_3d = tk.Label(right_panel, bg=C_CANVAS)
         self.canvas_3d.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
         self.canvas_3d.bind("<MouseWheel>", self._on_mouse_wheel)
+        self.canvas_3d.bind("<Button-1>", self._on_mouse_press)
+        self.canvas_3d.bind("<B1-Motion>", self._on_mouse_drag)
         self.canvas_3d.bind("<Button-4>", lambda e: self._step_frame(-1)) # Linux scroll up
         self.canvas_3d.bind("<Button-5>", lambda e: self._step_frame(1))  # Linux scroll down
 
@@ -497,6 +499,19 @@ class Boali3DCTStudioDialog(tk.Toplevel):
         im_pil = Image.fromarray(rgb)
         self.tk_photo = ImageTk.PhotoImage(im_pil)
         self.canvas_3d.config(image=self.tk_photo)
+
+    def _on_mouse_press(self, event):
+        self._last_drag_x = event.x
+        self._last_drag_y = event.y
+
+    def _on_mouse_drag(self, event):
+        if not hasattr(self, "_last_drag_x") or not self.cine_frames:
+            return
+        dx = event.x - self._last_drag_x
+        if abs(dx) >= 8:
+            step = 1 if dx > 0 else -1
+            self._step_frame(-step)
+            self._last_drag_x = event.x
 
     def _on_mouse_wheel(self, event):
         if event.delta > 0:
