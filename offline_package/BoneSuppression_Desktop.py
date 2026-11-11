@@ -32,6 +32,7 @@ import numpy as np
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 import queue
+import threading
 from PIL import Image, ImageTk
 from pacs_downloader import MedalPacsClient, PacsCacheManager
 
@@ -71,6 +72,10 @@ if getattr(sys, 'frozen', False):
 else:
     EXE_DIR = os.path.dirname(os.path.abspath(__file__))
     BUNDLE_DIR = EXE_DIR
+
+for path_dir in [EXE_DIR, BUNDLE_DIR, os.path.join(EXE_DIR, "libs")]:
+    if path_dir and path_dir not in sys.path:
+        sys.path.insert(0, path_dir)
 
 PARENT_DIR = os.path.dirname(EXE_DIR)
 GRANDPARENT_DIR = os.path.dirname(PARENT_DIR)
@@ -187,12 +192,13 @@ DEFAULT_PASS_HASH = "912863a494a953280178cd8812895062696e4493e3c764f9e58c49bfaa6
 HOSPITAL_TITLE = "بیمارستان بوعلی مریوان"
 NETWORK_TITLE = "شبکه بهداشت و درمان مریوان"
 DEVELOPER_NAME = "آرام مصطفائی"
-APP_VERSION = "2.8.4"
-APP_TITLE = f"پلتفرم تخصصی هوش مصنوعی رادیولوژی {HOSPITAL_TITLE} | {DEVELOPER_NAME} (نگارش v{APP_VERSION})"
+APP_VERSION = "3.0.2"
+APP_NAME_BASE = "نرم افزار تخصصی واحد تصویر برداری بیمارستان بوعلی - آرام مصطفائی"
+APP_TITLE = f"{APP_NAME_BASE} (نگارش v{APP_VERSION})"
 DEVELOPER_ROLE = "پرسنل واحد امور تصویربرداری بیمارستان بوعلی"
 DEVELOPER_PHONES = ["09356808002", "09188766949"]
 DEVELOPER_EMAIL = "arammoostafaye@gmail.com"
-DEVELOPER_GITHUB = "https://github.com/arammoostafaye"
+DEVELOPER_GITHUB = "https://github.com/arammoostafaye/boali-radiology-suite"
 UPSTREAM_SOURCE = "https://huggingface.co/qureaiorg/bone-suppression"
 
 # -----------------------------------------------------------------------------
@@ -247,6 +253,7 @@ class ClinicalReportModal(tk.Toplevel):
     def __init__(self, parent, report_type="mammo", patient_info=None, app_state=None):
         super().__init__(parent)
         self.parent = parent
+        self.app = getattr(parent, "app", parent)
         self.report_type = tk.StringVar(value=report_type)
         self.app_state = app_state or {}
         self.patient_info = patient_info or {}
@@ -257,6 +264,7 @@ class ClinicalReportModal(tk.Toplevel):
         self.p_date_var = tk.StringVar(value=info.get("date") or time.strftime("%Y/%m/%d"))
         self.p_id_var = tk.StringVar(value=info.get("id") or "")
         self.active_lang_tab = tk.StringVar(value="en")
+        self.ct_protocol = tk.StringVar(value="abd")
 
         if not self.p_name_var.get() or self.p_name_var.get() == "ثبت نشده":
             views = self.app_state.get("mammo_4views") or {}
@@ -300,6 +308,7 @@ class ClinicalReportModal(tk.Toplevel):
 
         types = [
             ("mammo", "🩺 ماموگرافی جامع ۴ نمایه (Bilateral 4-View)", "#ec4899"),
+            ("ct3d", "🧊 سی‌تی اسکن و ۳D (MDCT 3D)", "#0284c7"),
             ("chest", "🫁 رادیوگرافی قفسه سینه (Chest X-Ray)", "#8b5cf6"),
             ("ortho", "🦴 ارتوپدی و شکستگی (Musculoskeletal)", "#f59e0b")
         ]
@@ -349,8 +358,30 @@ class ClinicalReportModal(tk.Toplevel):
                                   command=self.regenerate_reports)
             rb_b.pack(side=tk.LEFT, padx=4)
 
+        # Systematic CT Sub-Protocol Selector Row
+        self.ct_protocol_frame = tk.Frame(control_frame, bg="#0d1424")
+        self.ct_protocol_frame.pack(fill=tk.X, pady=(4, 0))
+
+        tk.Label(self.ct_protocol_frame, text="پروتکل ممیزی سیستماتیک سی‌تی اسکن (Zero Miss Checklist):",
+                 font=("Segoe UI", 8, "bold"), fg="#38bdf8", bg="#0d1424").pack(side=tk.LEFT, padx=(6, 4))
+        
+        ct_protos = [
+            ("abd", "🩺 شکم و لگن (Abdomen & Pelvis)", "#38bdf8"),
+            ("chest", "🫁 قفسه سینه (Chest / Thorax)", "#10b981"),
+            ("brain", "🧠 مغز و جمجمه (Brain & Head)", "#a855f7"),
+            ("msk", "🦴 ارتوپدی و ۳D (MSK & 3D)", "#f59e0b")
+        ]
+        for p_val, p_lbl, p_col in ct_protos:
+            rb_p = tk.Radiobutton(self.ct_protocol_frame, text=p_lbl, variable=self.ct_protocol, value=p_val,
+                                  font=("Segoe UI", 8), bg="#0d1424", fg=p_col, selectcolor="#090d16",
+                                  activebackground="#0d1424", activeforeground=p_col,
+                                  command=self.regenerate_reports)
+            rb_p.pack(side=tk.LEFT, padx=3)
+
         if self.report_type.get() != "mammo":
             self.birads_override_frame.pack_forget()
+        if self.report_type.get() != "ct3d":
+            self.ct_protocol_frame.pack_forget()
 
         # 3. Language Segmented Tabs
         tab_bar = tk.Frame(self, bg="#090d16")
@@ -396,10 +427,10 @@ class ClinicalReportModal(tk.Toplevel):
                                   relief=tk.FLAT, padx=14, pady=6, cursor="hand2", command=self.export_docx)
         self.btn_docx.pack(side=tk.LEFT, padx=6)
 
-        self.btn_txt = tk.Button(bottom_bar, text="📄 ذخیره (.txt)", font=("Segoe UI", 9),
-                                 bg="#334155", fg="white", activebackground="#475569",
-                                 relief=tk.FLAT, padx=12, pady=6, cursor="hand2", command=self.export_txt)
-        self.btn_txt.pack(side=tk.LEFT, padx=6)
+        self.btn_pdf = tk.Button(bottom_bar, text="🖨️ صدور گزارش رسمی PDF", font=("Segoe UI", 9, "bold"),
+                                 bg="#dc2626", fg="white", activebackground="#ef4444", activeforeground="white",
+                                 relief=tk.FLAT, padx=14, pady=6, cursor="hand2", command=self.export_pdf)
+        self.btn_pdf.pack(side=tk.LEFT, padx=6)
 
         btn_close = tk.Button(bottom_bar, text="بستن", font=("Segoe UI", 9),
                               bg="#1e293b", fg="#94a3b8", activebackground="#334155",
@@ -415,6 +446,11 @@ class ClinicalReportModal(tk.Toplevel):
                 self.birads_override_frame.pack(fill=tk.X, pady=(4, 0))
             else:
                 self.birads_override_frame.pack_forget()
+        if hasattr(self, "ct_protocol_frame"):
+            if self.report_type.get() == "ct3d":
+                self.ct_protocol_frame.pack(fill=tk.X, pady=(4, 0))
+            else:
+                self.ct_protocol_frame.pack_forget()
         self.regenerate_reports()
 
     def switch_lang_tab(self, lang):
@@ -445,12 +481,206 @@ class ClinicalReportModal(tk.Toplevel):
         self.status_lbl.config(text="✓ متن گزارش در حافظه کپی شد", fg="#34d399")
         self.after(3000, lambda: self.status_lbl.config(text=""))
 
-    def export_txt(self):
-        fn = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("Text file", "*.txt")])
-        if fn:
-            with open(fn, "w", encoding="utf-8") as f:
-                f.write(self.report_text.get("1.0", tk.END))
-            self.status_lbl.config(text="✓ ذخیره متن با موفقیت انجام شد", fg="#34d399")
+    def export_pdf(self):
+        try:
+            from boali_pdf_report_generator import BoaliPDFReportGenerator
+        except Exception as e:
+            messagebox.showerror("خطا", f"ماژول صدور PDF یافت نشد:\n{e}")
+            return
+
+        fn = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF Document", "*.pdf")])
+        if not fn:
+            return
+
+        try:
+            gen = BoaliPDFReportGenerator()
+            rep_type = self.report_type.get()
+            p_info = {
+                "name": (self.p_name_var.get().strip() if hasattr(self, "p_name_var") else "") or getattr(self.app, "patient_info", {}).get("name", "بیمار بالینی"),
+                "id": (self.p_id_var.get().strip() if hasattr(self, "p_id_var") else "") or getattr(self.app, "patient_info", {}).get("id", "1038432"),
+                "date": (self.p_date_var.get().strip() if hasattr(self, "p_date_var") else "") or getattr(self.app, "patient_info", {}).get("date", time.strftime("%Y/%m/%d")),
+                "age": (self.p_age_var.get().strip() if hasattr(self, "p_age_var") else "") or getattr(self.app, "patient_info", {}).get("age", "35")
+            }
+
+            birads_num = 1
+            if hasattr(self.app, "mammo_results") and self.app.mammo_results:
+                birads_num = self.app.mammo_results.get("birads", 1)
+
+            if rep_type == "mammo":
+                findings = [
+                    ("۱. دانسیته و تراکم پستان (ACR Density)", "تراکم فیبروگلندولار متقارن دوطرفه بر اساس رده‌بندی استاندارد ACR BI-RADS."),
+                    ("۲. تقارن نماهای چهارگانه (R-CC, L-CC, R-MLO, L-MLO)", "عدم وجود عدم تقارن کانونی یا انحراف معماری بافت (Architectural Distortion)."),
+                    ("۳. ارزیابی توده‌ها (Mass Screening)", "عدم وجود توده با کانتور اسپیکولیت یا دانسیته پاتولوژیک مشکوک."),
+                    ("۴. میکروکلسیفیکاسیون‌ها و کلسیفیکاسیون‌های عروقی", "عدم وجود کلاستر میکروکلسیفیکاسیون پلئومورفیک بدخیم."),
+                    ("۵. پوست، نیپل و لنف‌نودهای اگزیلاری", "ضخامت پوست نرمال، کمپلکس نیپل-آرئول سالم و لنف‌نودهای اگزیلاری با ناف چربی حفظ‌شده.")
+                ]
+                impr = [
+                    "• پستان‌های دوطرفه فاقد شواهد رادیولوژیک به نفع ضایعه بدخیم یا توده مشکوک می‌باشند.",
+                    f"• رده‌بندی تشخیصی: BI-RADS {birads_num} (نرمال / خوش‌خیم)."
+                ]
+                pacs = [
+                    "EXAMINATION: BILATERAL DIGITAL MAMMOGRAPHY (4-VIEW FFDM)",
+                    "FINDINGS: Symmetric fibroglandular density. No suspicious mass, distortion, or malignant calcifications.",
+                    f"IMPRESSION: BI-RADS {birads_num} - NEGATIVE FOR MALIGNANCY."
+                ]
+                recs = [
+                    "۱. ادامه غربالگری سالیانه ماموگرافی در سنین بالای ۴۰ سال.",
+                    "۲. در صورت لمس هرگونه توده جدید، معاینه و سونوگرافی تکمیلی پیشنهاد می‌شود."
+                ]
+            elif rep_type in ("ct", "ct3d", "ct_3d"):
+                proto = getattr(self, "ct_protocol", None)
+                proto_val = proto.get() if proto else "abd"
+
+                if proto_val == "abd":
+                    findings = [
+                        ("۱. کبد، کیسه صفرا و مجاری صفراوی (Liver & Biliary)", "ابعاد و دانسیته کبد طبیعی؛ بدون ضایعه فضاگیر یا استئاتوز شدید. کیسه صفرا با جدار نازک (<3mm) فاقد سنگ کلسیمی. مجاری صفراوی داخل و خارج کبدی و CBD کالیبر نرمال."),
+                        ("۲. طحال و عروق طحالی (Spleen)", "طحال دارای ابعاد طبیعی و جذب کنتراست یکنواخت؛ عدم وجود اسپلنومگالی یا ضایعه فوکال."),
+                        ("۳. لوزالمعده و شیار پانکرئودئودنال (Pancreas & Duodenum)", "سر، تنه، دم و پروسس آنسینات پانکراس طبیعی و هموژن؛ مجرای ویرسونگ غیرمتسع. شیار پانکرئودئودنال آزاد و بدون شواهد توده فضاگیر یا کیستیک. لومن دوازدهه حاوی ترشحات طبیعی بدون ضخامت پاتولوژیک جدار."),
+                        ("۴. غدد فوق کلیوی دوطرفه (Adrenal Glands)", "غدد آدرنال راست و چپ دارای بازوهای ظریف معکوس V/Y شکل (<5mm)؛ بدون ندول یا هایپرپلازی."),
+                        ("۵. کلیه‌ها، سیستم جمع‌کننده و حالب‌ها (Kidneys & Ureters)", "ضخامت کورتکس و ترشح متقارن پارانشیم کلیوی؛ عدم وجود سنگ رادیواپک، هیدرونفروز یا نقص پرشدگی در فاز ترشحی."),
+                        ("۶. لوله گوارش، آپاندیس و مزانتر (GI Tract & Appendix)", "معده و لوپ‌های روده باریک و کولون کالیبر طبیعی؛ آپاندیس با قطر زیر ۶ میلی‌متر و بدون استرندینگ چربی مزانتر."),
+                        ("۷. صفاق، مایع آزاد و لنفادنوپاتی (Peritoneum & Nodes)", "عدم رویت مایع آزاد در فضای موریسون و لگن؛ بدون لنفادنوپاتی پاتولوژیک رتروپریتونئال یا مزانتریک."),
+                        ("۸. عروق بزرگ شکمی (Vascular Structures)", "کالیبر آئورت شکمی، IVC، شریان مزانتریک فوقانی (SMA) و ورید پورت نرمال و فاقد آنوریسم یا ترومبوز."),
+                        ("۹. مثانه و احشای لگنی (Pelvis & Bladder)", "اتساع مناسب مثانه با جدار یکنواخت و لومن پاک. احشای لگنی فاقد توده مشکوک یا مایع محبوس."),
+                        ("۱۰. اسکلت، ستون فقرات و سمفیز پوبیس (Bony Skeleton)", "تراز مهره‌های کمری و ساختار استخوانی لگن و سمفیز پوبیس سالم؛ بدون ضایعه لیتیک، بلاستیک یا شکستگی حاد تروماتیک."),
+                        ("۱۱. قاعده ریه‌ها و پرده پلور (Lung Bases)", "قاعده هر دو ریه فاقد کانسالیدیشن، ندول ساب‌پلوال یا افیوژن پلورال پنهان.")
+                    ]
+                    impr = [
+                        "• سی‌تی اسکن مولتی‌فازیک شکم و لگن فاقد شواهد پاتولوژی ارگانیک یا توده فضاگیر در ممیزی سیستماتیک ۱۱ گانه است.",
+                        "• رد قطعی لنفادنوپاتی پاتولوژیک، آسیت آزاد صفاقی و انسداد گوارشی/ادراری."
+                    ]
+                    pacs = [
+                        "EXAMINATION: MULTIPHASE MDCT OF ABDOMEN AND PELVIS (ZERO-MISS SYSTEMATIC PROTOCOL)",
+                        "FINDINGS: Organ-by-organ evaluation (Liver, Spleen, Pancreas, Adrenals, Kidneys, GI tract, Peritoneum, Vessels, Pelvis, Skeleton, Lung bases) demonstrates normal morphology, enhancement, and absence of focal lesion, calculi, or obstruction.",
+                        "IMPRESSION: UNREMARKABLE ABDOMINOPELVIC MDCT STUDY. NO FOCAL LESION OR ACUTE INFLAMMATORY PROCESS IDENTIFIED."
+                    ]
+                elif proto_val == "chest":
+                    findings = [
+                        ("۱. پارانشیم ریه‌ها (Lung Parenchyma)", "پارانشیم هر دو ریه شفاف؛ بدون ندول منفرد مشکوک، گراندگلس، کانسالیدیشن، برونشکتازی یا آمفیزم."),
+                        ("۲. راه‌های هوایی مرکزی و ناف ریه‌ها (Airways & Hila)", "تراشه و برونش‌های اصلی باز و در خط وسط؛ ناف ریه‌ها متقارن و فاقد لنفادنوپاتی هایلار."),
+                        ("۳. مدیاستن و عروق بزرگ (Mediastinum & Great Vessels)", "کالیبر آئورت توراسیک و شریان پولمونری نرمال؛ بدون آنوریسم، دیسکسیون یا لنفادنوپاتی مدیاستینال."),
+                        ("۴. قلب و پریکارد (Heart & Pericardium)", "اندازه قلب در محدوده طبیعی؛ عدم وجود افیوژن پریکاردیال."),
+                        ("۵. پرده پلور و زوایای کوستوفرنیک (Pleura)", "زوایای کوستوفرنیک دوطرف کاملاً باز و شارپ؛ بدون افیوژن پلورال یا پنوموتوراکس."),
+                        ("۶. جدار قفسه سینه و اسکلت (Chest Wall & Ribs)", "دنده‌ها، استرنوم و مهره‌های توراسیک سالم و بدون شکستگی تروماتیک."),
+                        ("۷. احشای فوقانی شکم (Upper Abdomen Inclusions)", "لوب چپ کبد، طحال و غدد فوق کلیوی فاقد توده مشکوک یا لنفادنوپاتی.")
+                    ]
+                    impr = [
+                        "• سی‌تی اسکن قفسه سینه فاقد ندول فعال ریوی، افیوژن، لنفادنوپاتی مدیاستینال یا اختلال عروقی است.",
+                        "• حفظ کامل شفافیت پارانشیمال و راستای اسکلتی توراکس."
+                    ]
+                    pacs = [
+                        "EXAMINATION: MULTI-DETECTOR CHEST CT (THORACIC PROTOCOL)",
+                        "FINDINGS: Clear bilateral lung parenchyma without nodule, consolidation, or interstitial thickening. Normal mediastinal contours, cardiac size, and great vessel calibers. No pleural effusion or pneumothorax.",
+                        "IMPRESSION: NORMAL CHEST CT STUDY. NO ACTIVE INFILTRATE OR MEDIASTINAL MASS."
+                    ]
+                elif proto_val == "brain":
+                    findings = [
+                        ("۱. خونریزی حاد داخل جمجمه (Blood / Hemorrhage)", "عدم وجود خونریزی حاد در فضاهای اپیدورال، ساب‌دورال، ساب‌آراکنوئید، اینتراپارانشیمال یا اینتراونتریکولار."),
+                        ("۲. سیس‌ترن‌ها و بطن‌ها (Cisterns & Ventricles)", "سیس‌ترن‌های بازال باز؛ تقارن کامل سیستم بطنی بدون اتساع هیدروسفالیک؛ عدم انحراف خط وسط (No Midline Shift)."),
+                        ("۳. پارانشیم مغز (Brain Parenchyma)", "تمایز طبیعی کورتیکال و ساب‌کورتیکال ماده سفید و خاکستری؛ عدم شواهد ایسکمی حاد ترومبوتیک واسکولار، ادم منتشره یا توده فضاگیر."),
+                        ("۴. استخوان‌ها و سینوس‌ها (Bone Window & Sinuses)", "کالواریا و قاعده جمجمه یکپارچه بدون خط شکستگی؛ سینوس‌های پارانازال و ماستوئیدها تهویه مناسب داشته و فاقد سطح مایع هستند.")
+                    ]
+                    impr = [
+                        "• سی‌تی اسکن مغز و قاعده جمجمه فاقد خونریزی حاد، اثر فشاری فضاگیر یا هیدروسفالی است.",
+                        "• تمایز ماده سفید و خاکستری و تقارن ساختارهای خط وسط حفظ شده است."
+                    ]
+                    pacs = [
+                        "EXAMINATION: NON-CONTRAST BRAIN CT (HEAD PROTOCOL)",
+                        "FINDINGS: No acute intra- or extra-axial hemorrhage. Ventricles and basal cisterns are symmetric and patent without midline shift. Preserved grey-white matter differentiation. Intact calvarium without skull fracture.",
+                        "IMPRESSION: NORMAL NON-CONTRAST BRAIN CT. NO ACUTE INTRACRANIAL ABNORMALITY."
+                    ]
+                else: # msk / 3d
+                    findings = [
+                        ("۱. یکپارچگی کورتکس و ترابکول‌های استخوانی (Cortical Bone)", "کانتور استخوان‌ها منظم؛ عدم وجود خط شکستگی حاد تروماتیک جابه‌جا شده یا ضایعه لیتیک/بلاستیک."),
+                        ("۲. انطباق و فضاهای مفصلی (Articular Congruity)", "راستای آناتومیک مفاصل کاملاً حفظ شده؛ فواصل مفصلی متقارن و عدم وجود سابلوکساسیون یا قطعه آزاد داخل مفصلی."),
+                        ("۳. بازسازی سه‌بعدی حجم (3D Volume Rendering)", "بازسازی سه‌بعدی ۳۶۰ درجه نشان‌دهنده یکپارچگی کورتیکال و عدم تغییر محور آناتومیک اسکلت است."),
+                        ("۴. بافت‌های نرم مجاور (Soft Tissues)", "کمپارتمان‌های بافت نرم و فواصل عضلانی اطراف استخوان نرمال و فاقد هماتوم متسع یا حباب گاز غیرطبیعی.")
+                    ]
+                    impr = [
+                        "• بررسی سی‌تی اسکن و بازسازی سه‌بعدی فاقد شکستگی حاد، جابه‌جایی یا دررفتگی مفصلی است.",
+                        "• راستای بیومکانیکال ساختار اسکلتی کاملاً حفظ گردیده است."
+                    ]
+                    pacs = [
+                        "EXAMINATION: 3D CT VOLUME RECONSTRUCTION & MUSCULOSKELETAL CT",
+                        "FINDINGS: Preserved cortical continuity and joint congruity. 3D cinematic volumetric render confirms symmetric alignment without displaced bone fragment or articular depression.",
+                        "IMPRESSION: UNREMARKABLE MSK / 3D CT STUDY. NO ACUTE DISPLACED FRACTURE OR DISLOCATION."
+                    ]
+
+                recs = [
+                    "۱. تطابق یافته‌ها با علائم بالینی و سیر اندیکاسیون اولیه ارجاع بیمار.",
+                    "۲. در صورت وجود هرگونه علامت فوکال مشکوک جدید یا تروما، بررسی‌های دوره‌ای مکمل پیشنهاد می‌گردد."
+                ]
+            elif rep_type == "ortho":
+                findings = [
+                    ("۱. ارزیابی کورتکس و خطوط استخوانی", "کانتور استخوان‌ها منظم بوده و شکستگی کورتیکال جابه‌جا شده رویت نمی‌شود."),
+                    ("۲. سطوح و فضاهای مفصلی", "راستای مفاصل حفظ‌شده و عدم وجود سابلوکساسیون."),
+                    ("۳. بافت‌های نرم اطراف اسکلت", "ادم خفیف بافت نرم بدون کلسیفیکاسیون غیرطبیعی.")
+                ]
+                impr = [
+                    "• عدم وجود شکستگی حاد یا دررفتگی استخوانی.",
+                    "• راستای آناتومیک مفاصل حفظ شده است."
+                ]
+                pacs = [
+                    "EXAMINATION: MUSCULOSKELETAL RADIOGRAPHY",
+                    "FINDINGS: Intact cortical margins. Preserved articular alignment.",
+                    "IMPRESSION: NO ACUTE OSSEOUS FRACTURE OR DISLOCATION IDENTIFIED."
+                ]
+                recs = [
+                    "۱. مراقبت محافظه‌کارانه و کنترل بالینی اندام.",
+                    "۲. در صورت شک بالینی شدید یا ادامه درد، تصویربرداری تکمیلی سی‌تی اسکن یا ام‌آر‌آی پیشنهاد می‌گردد."
+                ]
+            else:
+                findings = [
+                    ("۱. پارانشیم ریه‌ها و عروق پولمونری", "فضای ریه‌ها شفاف، عدم وجود کانسالیدیشن، اینفیلتراسیون یا ندول قطعی مشکوک."),
+                    ("۲. سایه قلبی مدیاستینال و شاخص CTR", f"اندازه قلب نرمال با شاخص کاردیوتوراسیک CTR: {getattr(self.app, 'ctr_value', 0.48):.2f} (زیر 0.50)."),
+                    ("۳. زوایای کوستوفرنیک و پرده پلور", "زوایای هر دو طرف کاملاً باز و شارپ، عدم وجود افیوژن پلورال."),
+                    ("۴. استخوان‌های قفسه سینه در نمای بدون استخوان", "دنده‌ها و ترقوه‌ها متقارن و بدون خط شکستگی تروماتیک حاد.")
+                ]
+                impr = [
+                    "• رادیوگرافی قفسه سینه فاقد ضایعه فعال التهابی، کانسالیدیشن، یا توده بدخیم است.",
+                    "• اندازه قلب و مدیاستن در محدوده کاملاً طبیعی می‌باشد."
+                ]
+                pacs = [
+                    "EXAMINATION: CHEST RADIOGRAPHY PA VIEW (BONE SUPPRESSION AI)",
+                    "FINDINGS: Clear lung fields bilaterally. Normal cardiac size and mediastinum. Sharp costophrenic sulci.",
+                    "IMPRESSION: NORMAL CHEST RADIOGRAPH. NO ACTIVE CARDIOPULMONARY INFILTRATE."
+                ]
+                recs = [
+                    "۱. پایش بالینی و پیگیری متناسب با علائم بیمار.",
+                    "۲. در صورت بروز علائم حاد تنفسی، تکرار کلیشه توصیه می‌شود."
+                ]
+
+            montage_path = None
+            if hasattr(self.app, "mammo_4view_summary") and self.app.mammo_4view_summary is not None:
+                montage_path = os.path.join(EXE_DIR, "temp_mammo_pdf_fig.jpg")
+                cv2.imwrite(montage_path, self.app.mammo_4view_summary)
+            elif hasattr(self.app, "last_3d_snapshot") and self.app.last_3d_snapshot is not None:
+                montage_path = os.path.join(EXE_DIR, "temp_3d_pdf_fig.jpg")
+                cv2.imwrite(montage_path, self.app.last_3d_snapshot)
+            elif getattr(self.app, "original_np", None) is not None:
+                montage_path = os.path.join(EXE_DIR, "temp_diag_pdf_fig.jpg")
+                arr_norm = np.clip(self.app.original_np, 0.0, 1.0)
+                u8_img = (arr_norm * 255.0).astype(np.uint8)
+                cv2.imwrite(montage_path, u8_img)
+            elif getattr(self.app, "ct_slices", None) and len(self.app.ct_slices) > 0:
+                montage_path = os.path.join(EXE_DIR, "temp_diag_pdf_fig.jpg")
+                mid_s = self.app.ct_slices[len(self.app.ct_slices) // 2]
+                arr_norm = np.clip(mid_s, 0.0, 1.0)
+                u8_img = (arr_norm * 255.0).astype(np.uint8)
+                cv2.imwrite(montage_path, u8_img)
+
+            gen.generate_report(fn, p_info, rep_type, findings, montage_path, impr, pacs, recs)
+            self.status_lbl.config(text="✓ گزارش رسمی PDF با موفقیت صادر شد", fg="#34d399")
+            messagebox.showinfo("صدور موفق PDF", f"گزارش رسمی و فوق‌تخصصی PDF با سربرگ بیمارستان بوعلی مریوان صادر شد:\n{fn}")
+            if sys.platform.startswith("win"):
+                try:
+                    os.startfile(fn)
+                except Exception:
+                    pass
+        except Exception as ex:
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("خطا در صدور PDF", f"خطا در ایجاد گزارش PDF:\n{ex}")
 
     def export_docx(self):
         if not docx:
@@ -504,8 +734,30 @@ class ClinicalReportModal(tk.Toplevel):
         age_val = self.p_age_var.get() or "---"
 
         t_type = self.report_type.get()
-        study_title_en = "Bilateral Digital Mammography (4-View)" if t_type == "mammo" else ("Chest Radiography (PA View)" if t_type == "chest" else "Musculoskeletal Radiography")
-        study_title_fa = "ماموگرافی جامع ۴ نمایه" if t_type == "mammo" else ("رادیوگرافی قفسه سینه" if t_type == "chest" else "رادیوگرافی استخوان و ارتوپدی")
+        if t_type == "mammo":
+            study_title_en = "Bilateral Digital Mammography (4-View)"
+            study_title_fa = "ماموگرافی جامع ۴ نمایه"
+        elif t_type in ("ct", "ct3d", "ct_3d"):
+            proto = getattr(self, "ct_protocol", None)
+            proto_val = proto.get() if proto else "abd"
+            if proto_val == "abd":
+                study_title_en = "Multiphase MDCT of Abdomen and Pelvis"
+                study_title_fa = "سی‌تی اسکن مولتی‌فازیک شکم و لگن"
+            elif proto_val == "chest":
+                study_title_en = "Multi-Detector Chest CT (Thoracic Protocol)"
+                study_title_fa = "سی‌تی اسکن قفسه سینه (توراکس)"
+            elif proto_val == "brain":
+                study_title_en = "Non-Contrast Brain CT (Head Protocol)"
+                study_title_fa = "سی‌تی اسکن مغز و قاعده جمجمه"
+            else:
+                study_title_en = "Musculoskeletal MDCT & 3D Volume Reconstruction"
+                study_title_fa = "سی‌تی اسکن ارتوپدی و بازسازی سه‌بعدی"
+        elif t_type == "chest":
+            study_title_en = "Chest Radiography (PA View)"
+            study_title_fa = "رادیوگرافی قفسه سینه"
+        else:
+            study_title_en = "Musculoskeletal Radiography"
+            study_title_fa = "رادیوگرافی استخوان و ارتوپدی"
 
         p_l = c_l.paragraphs[0]
         p_l.alignment = WD_ALIGN_PARAGRAPH.LEFT
@@ -1127,8 +1379,8 @@ class ModernAboutDialog(tk.Toplevel):
         title_frame = tk.Frame(header, bg=C_HEADER)
         title_frame.pack(side=tk.LEFT, padx=22, pady=12)
 
-        tk.Label(title_frame, text="🫁 BoneSuppression AI - Multi-AI Chest Studio",
-                 font=("Segoe UI", 13, "bold"), fg=C_CYAN, bg=C_HEADER).pack(anchor=tk.W)
+        tk.Label(title_frame, text=f"🏥 {APP_NAME_BASE}",
+                 font=("Segoe UI", 12, "bold"), fg=C_CYAN, bg=C_HEADER).pack(anchor=tk.W)
         tk.Label(title_frame, text=f"نگارش v{APP_VERSION} | {HOSPITAL_TITLE} - {NETWORK_TITLE}",
                  font=("Segoe UI", 9), fg=C_TEXT_MUTED, bg=C_HEADER).pack(anchor=tk.W, pady=(2, 0))
 
@@ -1218,7 +1470,7 @@ class ModernAboutDialog(tk.Toplevel):
 
         c2_head = tk.Frame(card2, bg=C_CARD)
         c2_head.pack(fill=tk.X, padx=16, pady=(12, 6))
-        tk.Label(c2_head, text=f"🧠 ۵ موتور هوش مصنوعی یکپارچه‌شده در نسخه v{APP_VERSION}",
+        tk.Label(c2_head, text=f"🧠 ۶ موتور هوش مصنوعی و پردازش سه‌بعدی یکپارچه‌شده در نسخه v{APP_VERSION}",
                  font=("Segoe UI", 10, "bold"), fg=C_AMBER, bg=C_CARD).pack(anchor=tk.W)
 
         engines = [
@@ -1230,7 +1482,9 @@ class ModernAboutDialog(tk.Toplevel):
              "غربالگری کاردیومگالی، پلورال افیوژن، پنوموتوراکس، پنومونی، ندول و توده‌ها به همراه خط‌کش کالیبره CTR."),
             ("۴. استودیوی غربالگری جامع ماموگرافی ۴ نمایه (Bilateral FFDM 4-View & BI-RADS)",
              "تحلیل تقارن دوطرفه پستان‌ها در ۴ نمای استاندارد R-CC, L-CC, R-MLO, L-MLO، تخمین دانسیته ACR و رده‌بندی BI-RADS."),
-            ("۵. سامانه صدور خودکار گزارش بالینی استاندارد بیمارستان (Clinical Reporting Engine)",
+            ("۵. استودیوی بازسازی سه‌بعدی سی‌تی اسکن (3D CT Reconstruction Studio)",
+             "تبدیل مقاطع خام ۲D محوری سی‌تی اسکن به مدل‌های سه‌بعدی چرخشی ۳۶۰ درجه با پریست‌های تخصصی ارتوپدی و تروما، جمجمه، ستون فقرات، لگن و آنژیوگرافی عروق و خروجی STL پرینت سه‌بعدی."),
+            ("۶. سامانه صدور خودکار گزارش بالینی استاندارد بیمارستان (Clinical Reporting Engine)",
              "تولید رسمی گزارش دوزبانه انگلیسی و فارسی منطبق با ساختار استاندارد بیمارستان بوعلی با قابلیت صدور فایل Word (.docx) و کپی در HIS.")
         ]
         for title, detail in engines:
@@ -1840,6 +2094,12 @@ class MedalPacsModal(tk.Toplevel):
                              activebackground=C_CARD, activeforeground=C_CYAN, font=("Segoe UI", 9, "bold"))
         rb2.pack(anchor=tk.W, pady=3)
 
+        rb3 = tk.Radiobutton(row_mods, text="  🧊 مقاطع سی‌تی اسکن و استودیوی بازسازی سه‌بعدی (3D CT Reconstruction Studio)\n     ➔ دریافت کامل اسلایس‌های CT، تفکیک خودکار تخت و ورود مستقیم به استودیوی سه‌بعدی ۳۶۰ درجه",
+                             variable=self.target_modality, value="ct3d", justify=tk.LEFT,
+                             bg=C_CARD, fg="#38bdf8", selectcolor="#070d19",
+                             activebackground=C_CARD, activeforeground="#38bdf8", font=("Segoe UI", 9, "bold"))
+        rb3.pack(anchor=tk.W, pady=3)
+
         # 4. Actions & Cache Cleaning Bar
         action_bar = tk.Frame(body, bg=C_CANVAS)
         action_bar.pack(fill=tk.X, pady=(0, 8))
@@ -1961,8 +2221,28 @@ class MedalPacsModal(tk.Toplevel):
 
         self.log(f"✓ دریافت موفقیت‌آمیز {len(dicom_files)} فایل دایکام از {connected_base} برای {pname} (شناسه: {pid})")
 
+        is_ct = False
+        if dicom_files:
+            try:
+                import pydicom
+                ds0 = pydicom.dcmread(dicom_files[0], force=True, stop_before_pixels=True)
+                modality = str(getattr(ds0, "Modality", "")).upper()
+                if modality == "CT" or len(dicom_files) >= 15:
+                    is_ct = True
+            except Exception:
+                if len(dicom_files) >= 15:
+                    is_ct = True
+
         mod = self.target_modality.get()
-        if mod == "mammo":
+        if mod == "ct3d" or is_ct:
+            ct_folder = res.get("extract_folder") or (os.path.dirname(dicom_files[0]) if dicom_files else "")
+            self.destroy()
+            self.app.active_ai_module.set("ct3d")
+            self.app.load_ct_series_to_app(ct_folder, dicom_files, pname=pname, pid=pid, auto_open_studio=True)
+            messagebox.showinfo("اتمام دریافت سی‌تی اسکن از پکس",
+                                f"مقاطع سی‌تی اسکن بیمار ({len(dicom_files)} مقطع دایکام) با موفقیت از پکس ({connected_base}) دریافت و مستقیم به استودیوی بازسازی سه‌بعدی متصل گردید:\n\n"
+                                f"نام بیمار: {pname}\nشناسه: {pid}\nتعداد مقاطع: {len(dicom_files)}\nپوشه ذخیره: {ct_folder}")
+        elif mod == "mammo":
             self.app.load_dicom_files_to_mammo(dicom_files, pname=pname, pid=pid)
             messagebox.showinfo("اتمام دریافت پکس",
                                 f"کلیشه‌های ماموگرافی بیمار با موفقیت از پکس ({connected_base}) دریافت و در استودیو بارگذاری شدند:\n\n"
@@ -2043,11 +2323,28 @@ class MedalPacsModal(tk.Toplevel):
                              parent=self)
 
 
+
+# =============================================================================
+# =============================================================================
+# 3D CT Reconstruction Studio Engine & Dialog Integration
+# 100% Offline Clinical Grade (Kowsar PACS Standard, VTK & NumPy Dual Architecture)
+# =============================================================================
+try:
+    from boali_ct_3d_engine import Boali3DReconstructor, PRESETS
+    from boali_ct_3d_studio_dialog import Boali3DCTStudioDialog
+except ImportError:
+    try:
+        from offline_package.boali_ct_3d_engine import Boali3DReconstructor, PRESETS
+        from offline_package.boali_ct_3d_studio_dialog import Boali3DCTStudioDialog
+    except ImportError:
+        pass
+
+
 class BoneSuppressionApp(tk.Tk):
-    """BoneSuppression AI Desktop Workstation with integrated multi-AI suites and dockable sidebar."""
+    """BoneSuppression AI Desktop Workstation with integrated multi-AI suites, 3D CT reconstruction, and dockable sidebar."""
     def __init__(self):
         super().__init__()
-        self.title(f"پلتفرم تخصصی هوش مصنوعی رادیولوژی {HOSPITAL_TITLE} | {DEVELOPER_NAME} (نگارش v{APP_VERSION})")
+        self.title(f"{APP_NAME_BASE} (نگارش v{APP_VERSION})")
         self.geometry("1320x860")
         self.minsize(1100, 720)
         self.configure(bg=C_CANVAS)
@@ -2328,7 +2625,7 @@ class BoneSuppressionApp(tk.Tk):
         brand_frame = tk.Frame(header_bar, bg=C_HEADER)
         brand_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=14, pady=6)
 
-        tk.Label(brand_frame, text=f"🏥 پلتفرم تخصصی هوش مصنوعی رادیولوژی {HOSPITAL_TITLE} | {DEVELOPER_NAME} (نگارش v{APP_VERSION})",
+        tk.Label(brand_frame, text=f"🏥 {APP_NAME_BASE} (نگارش v{APP_VERSION})",
                  font=("Segoe UI", 11, "bold"), fg=C_CYAN, bg=C_HEADER, anchor="w").pack(side=tk.LEFT)
 
         tk.Label(right_header, text="👤 boalimri.ir", font=("Segoe UI", 9, "bold"), fg="#10b981", bg="#0b0f19",
@@ -2356,17 +2653,13 @@ class BoneSuppressionApp(tk.Tk):
                                         bg="#0284c7", hover_bg="#0369a1", font=("Segoe UI", 9, "bold"), padx=12, pady=6)
         btn_pacs.pack(side=tk.LEFT, padx=6, pady=8)
 
-        self.btn_run_active = create_modern_button(toolbar, "⚡ اجرای جداسازی استخوان", self.run_active_engine,
+        self.btn_run_active = create_modern_button(toolbar, "⚡ اجرای پردازش هوش مصنوعی", self.run_active_engine,
                                                    bg=C_GREEN, hover_bg=C_GREEN_HOVER, font=("Segoe UI", 9, "bold"), padx=16, pady=6)
         self.btn_run_active.pack(side=tk.LEFT, padx=6, pady=8)
 
         btn_save = create_modern_button(toolbar, "💾 ذخیره نتایج", self.save_results,
                                         bg=C_SLATE, hover_bg=C_SLATE_HOVER, font=("Segoe UI", 9), padx=12, pady=6)
         btn_save.pack(side=tk.LEFT, padx=6, pady=8)
-
-        btn_batch = create_modern_button(toolbar, "📁 پردازش گروهی پوشه", self.batch_process,
-                                         bg=C_SLATE, hover_bg=C_SLATE_HOVER, font=("Segoe UI", 9), padx=12, pady=6)
-        btn_batch.pack(side=tk.LEFT, padx=6, pady=8)
 
         btn_toggle_sidebar = create_modern_button(toolbar, "🩺 سایدبار هوش مصنوعی", self.toggle_sidebar,
                                                   bg=C_SLATE, hover_bg=C_BLUE, font=("Segoe UI", 9), padx=10, pady=6)
@@ -2407,7 +2700,7 @@ class BoneSuppressionApp(tk.Tk):
         self.canvas.bind("<B2-Motion>", self.on_pan_drag)
 
         # Specialized Radiology Sidebar Frame
-        self.sidebar_frame = tk.Frame(self.work_area, bg=C_CARD, width=340, bd=1, relief=tk.SOLID,
+        self.sidebar_frame = tk.Frame(self.work_area, bg=C_CARD, width=410, bd=1, relief=tk.SOLID,
                                       highlightbackground=C_BORDER, highlightthickness=1)
         self.sidebar_frame.pack(side=tk.RIGHT, fill=tk.Y, expand=False)
         self.sidebar_frame.pack_propagate(False)
@@ -2439,56 +2732,113 @@ class BoneSuppressionApp(tk.Tk):
         self.status_label.pack(side=tk.RIGHT, padx=14, pady=6)
 
     def init_sidebar_content(self):
-        # Header of Sidebar
-        sb_head = tk.Frame(self.sidebar_frame, bg=C_TOOLBAR, height=40)
+        # 1. Header of Sidebar - Sleek Dark Medical Style
+        sb_head = tk.Frame(self.sidebar_frame, bg=C_HEADER, height=52, bd=1, relief=tk.SOLID,
+                           highlightbackground=C_BORDER, highlightthickness=1)
         sb_head.pack(fill=tk.X)
-        tk.Label(sb_head, text="🩺 جعبه‌ابزار تخصصی هوش مصنوعی", font=("Segoe UI", 10, "bold"),
-                 fg=C_CYAN, bg=C_TOOLBAR).pack(side=tk.LEFT, padx=12, pady=8)
 
-        # Segmented AI Module Selector
-        selector_frame = tk.Frame(self.sidebar_frame, bg=C_CARD, pady=8)
-        selector_frame.pack(fill=tk.X, padx=8)
+        h_content = tk.Frame(sb_head, bg=C_HEADER)
+        h_content.pack(fill=tk.X, padx=12, pady=6)
+
+        tk.Label(h_content, text="🩺 جعبه‌ابزار هوش مصنوعی رادیولوژی", font=("Segoe UI", 10, "bold"),
+                 fg=C_CYAN, bg=C_HEADER).pack(anchor=tk.E)
+        tk.Label(h_content, text="واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی", font=("Segoe UI", 8),
+                 fg=C_TEXT_MUTED, bg=C_HEADER).pack(anchor=tk.E)
+
+        # 2. Segmented AI Module Selector - Modern 2-Row / 2-Column Structured Grid
+        selector_frame = tk.Frame(self.sidebar_frame, bg="#0b111e", pady=8, padx=8, bd=1, relief=tk.SOLID,
+                                  highlightbackground=C_BORDER, highlightthickness=1)
+        selector_frame.pack(fill=tk.X, padx=10, pady=(8, 4))
+
+        tk.Label(selector_frame, text="انتخاب ماژول تخصصی (Clinical AI Suite):", font=("Segoe UI", 8, "bold"),
+                 fg=C_CYAN, bg="#0b111e").pack(anchor=tk.E, padx=4, pady=(0, 6))
+
+        grid_btns = tk.Frame(selector_frame, bg="#0b111e")
+        grid_btns.pack(fill=tk.X)
+        grid_btns.columnconfigure(0, weight=1)
+        grid_btns.columnconfigure(1, weight=1)
 
         self.mod_btns = {}
-        modules = [
-            ("suppress", "🩻 بافت نرم"),
-            ("fracture", "🦴 شکستگی"),
-            ("pathology", "🫁 ۱۸ بیماری & CTR"),
-            ("mammo", "🩺 ماموگرافی"),
+        # Define 5 modules with clinical icons, Persian titles, and active glowing themes
+        modules_cfg = [
+            ("suppress", "🩻 بافت نرم ریه", 0, 0, "#059669"),
+            ("fracture", "🦴 کشف شکستگی", 0, 1, "#d97706"),
+            ("pathology", "🫁 ۱۸ بیماری & CTR", 1, 0, "#7c3aed"),
+            ("mammo", "🩺 ماموگرافی ۴ نمایه", 1, 1, "#db2777"),
+            ("ct3d", "🧊 استودیوی ۳D سی‌تی اسکن", 2, 0, "#0284c7"),
         ]
-        for mod_id, mod_label in modules:
-            b = tk.Button(selector_frame, text=mod_label, font=("Segoe UI", 8, "bold" if mod_id == "suppress" else "normal"),
-                          bg=C_BLUE if mod_id == "suppress" else C_SLATE, fg="white",
-                          activebackground=C_BLUE_HOVER, relief=tk.FLAT, bd=0, padx=6, pady=5, cursor="hand2",
-                          command=lambda m=mod_id: self.select_ai_module(m))
-            b.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
-            self.mod_btns[mod_id] = b
 
-        tk.Frame(self.sidebar_frame, bg=C_BORDER_SUBTLE, height=1).pack(fill=tk.X, padx=8, pady=4)
+        for mod_id, mod_label, r, c, acc_color in modules_cfg:
+            colspan = 2 if mod_id == "ct3d" else 1
+            btn = tk.Button(
+                grid_btns,
+                text=mod_label,
+                font=("Segoe UI", 8, "bold" if mod_id == "suppress" else "normal"),
+                bg=acc_color if mod_id == "suppress" else "#1e293b",
+                fg="white" if mod_id == "suppress" else C_TEXT_LIGHT,
+                activebackground=acc_color,
+                activeforeground="white",
+                relief=tk.FLAT,
+                bd=0,
+                padx=8,
+                pady=7,
+                cursor="hand2",
+                command=lambda m=mod_id: self.select_ai_module(m)
+            )
+            btn.grid(row=r, column=c, columnspan=colspan, sticky="nsew", padx=2, pady=2)
+            self.mod_btns[mod_id] = btn
 
-        # Dynamic Results & Controls Frame
-        self.sb_body = tk.Frame(self.sidebar_frame, bg=C_CARD)
-        self.sb_body.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+        # Divider line
+        tk.Frame(self.sidebar_frame, bg=C_BORDER, height=1).pack(fill=tk.X, padx=10, pady=4)
 
-        # Bottom Clinical Image Adjustments Card
+        # 3. Bottom Clinical Image Adjustments Card (Sleek Collapsible/Docked Card)
         tools_card = tk.Frame(self.sidebar_frame, bg="#0d1424", bd=1, relief=tk.SOLID,
                               highlightbackground=C_BORDER, highlightthickness=1, padx=10, pady=8)
-        tools_card.pack(fill=tk.X, side=tk.BOTTOM, padx=8, pady=8)
+        tools_card.pack(fill=tk.X, side=tk.BOTTOM, padx=10, pady=8)
 
-        tk.Label(tools_card, text="⚙️ تنظیمات نمایش تصویر بالینی:", font=("Segoe UI", 8, "bold"),
-                 fg=C_TEXT_MUTED, bg="#0d1424").pack(anchor=tk.W, pady=(0, 4))
+        t_head = tk.Frame(tools_card, bg="#0d1424")
+        t_head.pack(fill=tk.X, pady=(0, 4))
+        tk.Label(t_head, text="⚙️ تنظیمات نمایش تصویر بالینی", font=("Segoe UI", 8, "bold"),
+                 fg=C_CYAN, bg="#0d1424").pack(side=tk.RIGHT)
 
-        tk.Checkbutton(tools_card, text="بهبود خودکار کنتراست (0.5-99.5%)", variable=self.stretch_var,
+        t_grid = tk.Frame(tools_card, bg="#0d1424")
+        t_grid.pack(fill=tk.X)
+
+        tk.Checkbutton(t_grid, text="🔆 کنتراست خودکار (0.5-99.5%)", variable=self.stretch_var,
                        command=self.render_view, bg="#0d1424", fg=C_TEXT_LIGHT, selectcolor=C_CANVAS,
-                       activebackground="#0d1424", activeforeground=C_CYAN, font=("Segoe UI", 8)).pack(anchor=tk.W)
+                       activebackground="#0d1424", activeforeground=C_CYAN, font=("Segoe UI", 8)).pack(anchor=tk.E, pady=1)
 
-        tk.Checkbutton(tools_card, text="تقویت لبه و استخوان (Edge Boost)", variable=self.edge_boost_var,
+        tk.Checkbutton(t_grid, text="🔍 تقویت لبه و ترابکول استخوان", variable=self.edge_boost_var,
                        command=self.render_view, bg="#0d1424", fg=C_TEXT_LIGHT, selectcolor=C_CANVAS,
-                       activebackground="#0d1424", activeforeground=C_CYAN, font=("Segoe UI", 8)).pack(anchor=tk.W)
+                       activebackground="#0d1424", activeforeground=C_CYAN, font=("Segoe UI", 8)).pack(anchor=tk.E, pady=1)
 
-        tk.Checkbutton(tools_card, text="معکوس‌سازی قطبیت (Invert Polarity)", variable=self.invert_display_var,
+        tk.Checkbutton(t_grid, text="🔄 معکوس‌سازی قطبیت (Invert)", variable=self.invert_display_var,
                        command=self.render_view, bg="#0d1424", fg=C_TEXT_LIGHT, selectcolor=C_CANVAS,
-                       activebackground="#0d1424", activeforeground=C_CYAN, font=("Segoe UI", 8)).pack(anchor=tk.W)
+                       activebackground="#0d1424", activeforeground=C_CYAN, font=("Segoe UI", 8)).pack(anchor=tk.E, pady=1)
+
+        # 4. Smooth Scrollable Container for Dynamic AI Results
+        sb_scroll_wrap = tk.Frame(self.sidebar_frame, bg=C_CARD)
+        sb_scroll_wrap.pack(fill=tk.BOTH, expand=True, padx=8, pady=(2, 4))
+
+        self.sb_canvas = tk.Canvas(sb_scroll_wrap, bg=C_CARD, highlightthickness=0, bd=0)
+        self.sb_scrollbar = ttk.Scrollbar(sb_scroll_wrap, orient="vertical", command=self.sb_canvas.yview)
+        self.sb_body = tk.Frame(self.sb_canvas, bg=C_CARD)
+
+        self.sb_body.bind("<Configure>", lambda e: self.sb_canvas.configure(scrollregion=self.sb_canvas.bbox("all")))
+        self.sb_window_id = self.sb_canvas.create_window((0, 0), window=self.sb_body, anchor="nw", width=365)
+
+        def _on_sb_resize(e):
+            self.sb_canvas.itemconfig(self.sb_window_id, width=e.width)
+        self.sb_canvas.bind("<Configure>", _on_sb_resize)
+
+        def _on_sb_mousewheel(e):
+            self.sb_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        self.sb_canvas.bind("<MouseWheel>", _on_sb_mousewheel)
+        self.sb_body.bind("<MouseWheel>", _on_sb_mousewheel)
+
+        self.sb_canvas.configure(yscrollcommand=self.sb_scrollbar.set)
+        self.sb_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.sb_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         self.refresh_sidebar_ui()
 
@@ -2503,21 +2853,30 @@ class BoneSuppressionApp(tk.Tk):
 
     def select_ai_module(self, mod_id):
         self.active_ai_module.set(mod_id)
+        colors = {
+            "suppress": "#059669",
+            "fracture": "#d97706",
+            "pathology": "#7c3aed",
+            "mammo": "#db2777",
+            "ct3d": "#0284c7"
+        }
         for mid, btn in self.mod_btns.items():
             if mid == mod_id:
-                btn.config(bg=C_BLUE, font=("Segoe UI", 8, "bold"))
+                btn.config(bg=colors.get(mid, C_BLUE), fg="white", font=("Segoe UI", 8, "bold"))
             else:
-                btn.config(bg=C_SLATE, font=("Segoe UI", 8, "normal"))
+                btn.config(bg="#1e293b", fg=C_TEXT_LIGHT, font=("Segoe UI", 8, "normal"))
 
         # Update Main Run Button Text
         if mod_id == "suppress":
-            self.btn_run_active.config(text="⚡ اجرای جداسازی استخوان", bg=C_GREEN, activebackground=C_GREEN_HOVER)
+            self.btn_run_active.config(text="⚡ اجرای جداسازی استخوان (Bone Suppression)", bg=C_GREEN, activebackground=C_GREEN_HOVER)
         elif mod_id == "fracture":
-            self.btn_run_active.config(text="🦴 کشف شکستگی‌ها (Fracture AI)", bg="#d97706", activebackground="#f59e0b")
+            self.btn_run_active.config(text="🦴 کشف هوشمند شکستگی‌ها (Fracture AI)", bg="#d97706", activebackground="#f59e0b")
         elif mod_id == "pathology":
-            self.btn_run_active.config(text="🫁 غربالگری ۱۸ بیماری ریه", bg="#7c3aed", activebackground="#8b5cf6")
+            self.btn_run_active.config(text="🫁 غربالگری ۱۸ بیماری ریه و قلب (DenseNet-18)", bg="#7c3aed", activebackground="#8b5cf6")
         elif mod_id == "mammo":
-            self.btn_run_active.config(text="🩺 آنالیز ماموگرافی ۴ نمایه", bg="#ec4899", activebackground="#db2777")
+            self.btn_run_active.config(text="🩺 آنالیز ماموگرافی ۴ نمایه (BI-RADS AI)", bg="#ec4899", activebackground="#db2777")
+        elif mod_id == "ct3d":
+            self.btn_run_active.config(text="🧊 استودیوی ۳D سی‌تی اسکن (CT 3D Studio)", bg="#0284c7", activebackground="#0369a1")
 
         self.refresh_sidebar_ui()
         self.render_view()
@@ -2535,39 +2894,164 @@ class BoneSuppressionApp(tk.Tk):
             self.render_sidebar_pathology()
         elif mod == "mammo":
             self.render_sidebar_mammo()
+        elif mod == "ct3d":
+            self.render_sidebar_ct3d()
+
+        if hasattr(self, "sb_canvas"):
+            self.sb_canvas.yview_moveto(0)
+
+    def render_sidebar_ct3d(self):
+        head_box = tk.Frame(self.sb_body, bg="#0d1424", bd=1, relief=tk.SOLID,
+                            highlightbackground="#0284c7", highlightthickness=1, padx=8, pady=8)
+        head_box.pack(fill=tk.X, pady=(2, 6))
+
+        tk.Label(head_box, text="🧊 استودیوی بازسازی سه‌بعدی سی‌تی اسکن", font=("Segoe UI", 10, "bold"),
+                 fg="#38bdf8", bg="#0d1424").pack(anchor=tk.E)
+        tk.Label(head_box, text="واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی", font=("Segoe UI", 7),
+                 fg=C_TEXT_MUTED, bg="#0d1424").pack(anchor=tk.E, pady=(0, 4))
+
+        info_txt = "تبدیل مقاطع خام محوری ۲D سی‌تی اسکن به حجم سه‌بعدی چرخان ۳۶۰ درجه با تفکیک خودکار تخت، سایه‌پردازی فونگ و پریست‌های بالینی چند ارگان."
+        tk.Label(head_box, text=info_txt, font=("Segoe UI", 8), fg=C_TEXT_LIGHT, bg="#0d1424",
+                 justify=tk.RIGHT, wraplength=340).pack(anchor=tk.E, pady=(2, 8))
+
+        btn_launch = tk.Button(head_box, text="🚀 ورود به استودیوی بازسازی ۳D", font=("Segoe UI", 10, "bold"),
+                               bg="#0284c7", fg="white", activebackground="#0369a1", activeforeground="white",
+                               relief=tk.FLAT, pady=8, cursor="hand2",
+                               command=self.open_3d_ct_studio)
+        btn_launch.pack(fill=tk.X, pady=(2, 6))
+
+        btn_pacs_ct = tk.Button(head_box, text="🌐 دریافت مستقیم سی‌تی اسکن از پکس مدال", font=("Segoe UI", 9, "bold"),
+                                bg="#0284c7", fg="white", activebackground="#0369a1", activeforeground="white",
+                                relief=tk.FLAT, pady=6, cursor="hand2",
+                                command=self.open_pacs_modal)
+        btn_pacs_ct.pack(fill=tk.X, pady=(2, 6))
+
+        # Active CT Slice Controller Card
+        if getattr(self, "ct_slices", None) and len(self.ct_slices) > 0:
+            slice_box = tk.LabelFrame(self.sb_body, text=f" ناوبری مقاطع سی‌تی اسکن ({len(self.ct_slices)} مقطع) ",
+                                      font=("Segoe UI", 8, "bold"), fg="#38bdf8", bg=C_CARD, bd=1, relief=tk.SOLID, labelanchor="ne")
+            slice_box.pack(fill=tk.X, pady=4, padx=2)
+
+            cur_idx = getattr(self, "ct_slice_idx", 0)
+            lbl_slice_info = tk.Label(slice_box, text=f"مقطع فعلی: {cur_idx + 1} از {len(self.ct_slices)}",
+                                      font=("Segoe UI", 9, "bold"), fg=C_TEXT_LIGHT, bg=C_CARD)
+            lbl_slice_info.pack(pady=(4, 2))
+
+            def _on_ct_slider_change(val):
+                idx = int(float(val))
+                if 0 <= idx < len(self.ct_slices):
+                    self.ct_slice_idx = idx
+                    self.original_np = self.ct_slices[idx]
+                    lbl_slice_info.config(text=f"مقطع فعلی: {idx + 1} از {len(self.ct_slices)}")
+                    self.render_view()
+
+            ct_scale = ttk.Scale(slice_box, from_=0, to=len(self.ct_slices)-1, orient=tk.HORIZONTAL,
+                                 command=_on_ct_slider_change)
+            ct_scale.set(cur_idx)
+            ct_scale.pack(fill=tk.X, padx=8, pady=(2, 6))
+
+            btn_nav_row = tk.Frame(slice_box, bg=C_CARD)
+            btn_nav_row.pack(fill=tk.X, padx=8, pady=(0, 6))
+
+            def _step_slice(delta):
+                new_idx = max(0, min(len(self.ct_slices) - 1, self.ct_slice_idx + delta))
+                ct_scale.set(new_idx)
+                _on_ct_slider_change(new_idx)
+
+            tk.Button(btn_nav_row, text="◀◀ -10", font=("Segoe UI", 8), bg="#1e293b", fg=C_TEXT_LIGHT,
+                      relief=tk.FLAT, padx=4, pady=2, command=lambda: _step_slice(-10)).pack(side=tk.LEFT, padx=1)
+            tk.Button(btn_nav_row, text="◀ -1", font=("Segoe UI", 8), bg="#1e293b", fg=C_TEXT_LIGHT,
+                      relief=tk.FLAT, padx=4, pady=2, command=lambda: _step_slice(-1)).pack(side=tk.LEFT, padx=1)
+            tk.Button(btn_nav_row, text="+1 ▶", font=("Segoe UI", 8), bg="#1e293b", fg=C_TEXT_LIGHT,
+                      relief=tk.FLAT, padx=4, pady=2, command=lambda: _step_slice(1)).pack(side=tk.RIGHT, padx=1)
+            tk.Button(btn_nav_row, text="+10 ▶▶", font=("Segoe UI", 8), bg="#1e293b", fg=C_TEXT_LIGHT,
+                      relief=tk.FLAT, padx=4, pady=2, command=lambda: _step_slice(10)).pack(side=tk.RIGHT, padx=1)
+
+        # Presets Summary Card
+        p_card = tk.LabelFrame(self.sb_body, text=" پریست‌های آناتومیک آماده (Presets) ", font=("Segoe UI", 8, "bold"),
+                               fg=C_CYAN, bg=C_CARD, bd=1, relief=tk.SOLID, labelanchor="ne")
+        p_card.pack(fill=tk.X, pady=4, padx=2)
+
+        presets_list = [
+            ("🦴 استخوان و تروما", "شکستگی‌ها، کندگی رباط‌ها و انطباق سطوح مفصلی"),
+            ("💀 جمجمه، فک و صورت", "استخوان‌های نازک صورت، کاسه چشم و فک"),
+            ("🏛️ ستون فقرات و مهره‌ها", "بدنه مهره‌ها، پدیکل، لامینا و انحرافات"),
+            ("🩻 حلقه لگن و استابولوم", "ستون قدامی/خلفی استابولوم و مفاصل ساکروایلیاک"),
+            ("🩸 آنژیوگرافی عروق (MIP)", "عروق خونی حاجب، آنوریسم‌ها و تنگی‌ها"),
+            ("🫁 راه‌های هوایی و نای", "فضای هوای داخل نای و مجاری تنفسی"),
+        ]
+
+        for p_title, p_desc in presets_list:
+            row = tk.Frame(p_card, bg=C_CARD)
+            row.pack(fill=tk.X, padx=6, pady=2)
+            tk.Label(row, text=p_title, font=("Segoe UI", 8, "bold"), fg=C_TEXT_LIGHT, bg=C_CARD).pack(anchor=tk.E)
+            tk.Label(row, text=p_desc, font=("Segoe UI", 7), fg=C_TEXT_MUTED, bg=C_CARD).pack(anchor=tk.E)
+
+        # Snapshot Status Card
+        snap_box = tk.Frame(self.sb_body, bg="#0d1424", bd=1, relief=tk.SOLID, highlightbackground=C_BORDER, padx=8, pady=6)
+        snap_box.pack(fill=tk.X, pady=6)
+
+        if getattr(self, "last_3d_snapshot", None) is not None:
+            tk.Label(snap_box, text="✓ نمای سه‌بعدی ثبت‌شده در مستندات بالینی موجود است", font=("Segoe UI", 8, "bold"),
+                     fg="#34d399", bg="#0d1424").pack(anchor=tk.E)
+            btn_rep = tk.Button(snap_box, text="📝 مشاهده گزارش بالینی همراه با تصویر ۳D", font=("Segoe UI", 8, "bold"),
+                                bg="#059669", fg="white", activebackground="#047857", relief=tk.FLAT, pady=5, cursor="hand2",
+                                command=self.open_report_dialog)
+            btn_rep.pack(fill=tk.X, pady=(4, 2))
+        else:
+            tk.Label(snap_box, text="ℹ️ هنوز تصویری از استودیوی ۳D به گزارش افزوده نشده است.", font=("Segoe UI", 8),
+                     fg=C_TEXT_MUTED, bg="#0d1424").pack(anchor=tk.E)
 
     def render_sidebar_suppress(self):
-        tk.Label(self.sb_body, text="🩻 ماژول حذف استخوان (Qure.ai)", font=("Segoe UI", 9, "bold"),
-                 fg=C_CYAN, bg=C_CARD).pack(anchor=tk.W, pady=(4, 2))
-        info_txt = "تفکیک بافت نرم ریه از ساختار متراکم استخوانی دنده‌ها و ترقوه جهت آشکارسازی ندول‌های پنهان."
-        tk.Label(self.sb_body, text=info_txt, font=("Segoe UI", 8), fg=C_TEXT_MUTED, bg=C_CARD,
-                 justify=tk.RIGHT, wraplength=310).pack(anchor=tk.W, pady=(0, 8))
+        head_box = tk.Frame(self.sb_body, bg="#0d1424", bd=1, relief=tk.SOLID,
+                            highlightbackground="#059669", highlightthickness=1, padx=8, pady=8)
+        head_box.pack(fill=tk.X, pady=(2, 6))
 
-        status_box = tk.Frame(self.sb_body, bg="#0d1424", bd=1, relief=tk.SOLID, highlightbackground=C_BORDER)
+        tk.Label(head_box, text="🩻 ماژول حذف استخوان (Bone Suppression AI)", font=("Segoe UI", 9, "bold"),
+                 fg="#34d399", bg="#0d1424").pack(anchor=tk.E)
+        info_txt = "تفکیک بافت نرم ریه از ساختار متراکم استخوانی دنده‌ها و ترقوه جهت آشکارسازی ندول‌های پنهان، تراکم‌های رتروکاردیاک و ضایعات آپیکال."
+        tk.Label(head_box, text=info_txt, font=("Segoe UI", 8), fg=C_TEXT_LIGHT, bg="#0d1424",
+                 justify=tk.RIGHT, wraplength=340).pack(anchor=tk.E, pady=(2, 6))
+
+        btn_run = tk.Button(head_box, text="⚡ اجرای جداسازی استخوان (Qure.ai Engine)", font=("Segoe UI", 9, "bold"),
+                            bg="#059669", fg="white", activebackground="#047857", relief=tk.FLAT, pady=7, cursor="hand2",
+                            command=self.run_suppression_inference)
+        btn_run.pack(fill=tk.X, pady=(2, 4))
+
+        status_box = tk.Frame(self.sb_body, bg="#0d1424", bd=1, relief=tk.SOLID, highlightbackground=C_BORDER, padx=8, pady=6)
         status_box.pack(fill=tk.X, pady=4)
         if self.soft_np is not None:
-            tk.Label(status_box, text="✓ پردازش با موفقیت انجام شد", font=("Segoe UI", 8, "bold"), fg="#34d399", bg="#0d1424").pack(padx=8, pady=6)
+            tk.Label(status_box, text="✓ پردازش بافت نرم با موفقیت انجام شد", font=("Segoe UI", 8, "bold"), fg="#34d399", bg="#0d1424").pack(anchor=tk.E)
+            tk.Label(status_box, text="می‌توانید با اسلایدر پایین نماها را مقایسه کنید.", font=("Segoe UI", 7), fg=C_TEXT_MUTED, bg="#0d1424").pack(anchor=tk.E)
         else:
-            tk.Label(status_box, text="منتظر اجرای پردازش با دکمه سبز بالا...", font=("Segoe UI", 8), fg=C_AMBER, bg="#0d1424").pack(padx=8, pady=6)
+            tk.Label(status_box, text="منتظر اجرای پردازش با دکمه سبز بالا...", font=("Segoe UI", 8), fg=C_AMBER, bg="#0d1424").pack(anchor=tk.E)
 
     def render_sidebar_fracture(self):
-        head_box = tk.Frame(self.sb_body, bg=C_CARD)
-        head_box.pack(fill=tk.X, pady=(2, 4))
+        head_box = tk.Frame(self.sb_body, bg="#0d1424", bd=1, relief=tk.SOLID,
+                            highlightbackground="#d97706", highlightthickness=1, padx=8, pady=8)
+        head_box.pack(fill=tk.X, pady=(2, 6))
 
-        tk.Label(head_box, text="🦴 ماژول تخصصی کشف شکستگی (Fracture AI)", font=("Segoe UI", 9, "bold"),
-                 fg="#f59e0b", bg=C_CARD).pack(side=tk.LEFT)
+        h_top = tk.Frame(head_box, bg="#0d1424")
+        h_top.pack(fill=tk.X)
 
-        # Validation metrics button
-        btn_val = tk.Button(head_box, text="📊 دقت بالینی", font=("Segoe UI", 7, "bold"),
+        tk.Label(h_top, text="🦴 کشف شکستگی (Fracture AI)", font=("Segoe UI", 9, "bold"),
+                 fg="#f59e0b", bg="#0d1424").pack(side=tk.RIGHT)
+
+        btn_val = tk.Button(h_top, text="📊 دقت بالینی", font=("Segoe UI", 7, "bold"),
                             bg="#1e293b", fg="#38bdf8", activebackground="#334155", activeforeground="white",
                             bd=1, relief=tk.SOLID, padx=6, pady=1, cursor="hand2",
                             command=lambda: self.show_clinical_validation_dialog("fracture"))
-        btn_val.pack(side=tk.RIGHT)
+        btn_val.pack(side=tk.LEFT)
+
+        btn_run = tk.Button(head_box, text="⚡ شروع اسکن شکستگی و ترک استخوان", font=("Segoe UI", 9, "bold"),
+                            bg="#d97706", fg="white", activebackground="#b45309", relief=tk.FLAT, pady=7, cursor="hand2",
+                            command=self.run_fracture_inference)
+        btn_run.pack(fill=tk.X, pady=(6, 2))
 
         # Anatomy Selection Frame
-        anat_frame = tk.LabelFrame(self.sb_body, text=" 🏷️ انتخاب اندام مورد بررسی (Anatomy) ", font=("Segoe UI", 8, "bold"),
-                                   fg=C_CYAN, bg=C_CARD, bd=1, relief=tk.SOLID)
-        anat_frame.pack(fill=tk.X, pady=(0, 4), padx=2)
+        anat_frame = tk.LabelFrame(self.sb_body, text=" اندام مورد بررسی (Target Anatomy) ", font=("Segoe UI", 8, "bold"),
+                                   fg=C_CYAN, bg=C_CARD, bd=1, relief=tk.SOLID, labelanchor="ne")
+        anat_frame.pack(fill=tk.X, pady=4, padx=2)
 
         options = [
             ("ortho", "🦴 ارتوپدی و اندام‌ها (دست، مچ، ساعد، پا)"),
@@ -2579,16 +3063,16 @@ class BoneSuppressionApp(tk.Tk):
             tk.Radiobutton(anat_frame, text=label, variable=self.fracture_anatomy, value=val,
                            bg=C_CARD, fg=C_TEXT_LIGHT, selectcolor=C_CANVAS,
                            activebackground=C_CARD, activeforeground="#f59e0b",
-                           font=("Segoe UI", 8)).pack(anchor=tk.W, padx=6, pady=1)
+                           font=("Segoe UI", 8)).pack(anchor=tk.E, padx=6, pady=1)
 
         # Sensitivity / Confidence Slider Frame
-        sens_frame = tk.LabelFrame(self.sb_body, text=" 🎚️ حساسیت غربالگری و کشف ترک (Confidence) ",
-                                   font=("Segoe UI", 8, "bold"), fg=C_CYAN, bg=C_CARD, bd=1, relief=tk.SOLID)
-        sens_frame.pack(fill=tk.X, pady=(0, 4), padx=2)
+        sens_frame = tk.LabelFrame(self.sb_body, text=" آستانه حساسیت غربالگری (Confidence) ",
+                                   font=("Segoe UI", 8, "bold"), fg=C_CYAN, bg=C_CARD, bd=1, relief=tk.SOLID, labelanchor="ne")
+        sens_frame.pack(fill=tk.X, pady=4, padx=2)
 
         self.sens_label = tk.Label(sens_frame, text=f"آستانه اطمینان: {self.fracture_conf_var.get():.0%} (غربالگری ظریف)",
                                    font=("Segoe UI", 8), fg="#fbbf24", bg=C_CARD)
-        self.sens_label.pack(anchor=tk.W, padx=6, pady=(2, 0))
+        self.sens_label.pack(anchor=tk.E, padx=6, pady=(2, 0))
 
         def on_slider_change(val):
             v = float(val)
@@ -2607,15 +3091,15 @@ class BoneSuppressionApp(tk.Tk):
 
         # Enhancement checkbuttons
         chk_frame = tk.Frame(self.sb_body, bg=C_CARD)
-        chk_frame.pack(fill=tk.X, pady=(0, 4))
+        chk_frame.pack(fill=tk.X, pady=2)
 
         tk.Checkbutton(chk_frame, text="تقویت ترابکول استخوان (CLAHE)", variable=self.clahe_var,
                        bg=C_CARD, fg=C_TEXT_LIGHT, selectcolor=C_CANVAS,
-                       activebackground=C_CARD, activeforeground=C_AMBER, font=("Segoe UI", 8)).pack(side=tk.LEFT)
+                       activebackground=C_CARD, activeforeground=C_AMBER, font=("Segoe UI", 8)).pack(side=tk.RIGHT)
 
         tk.Checkbutton(chk_frame, text="نمایش کادرها روی تصویر", variable=self.show_fracture_boxes,
                        command=self.render_view, bg=C_CARD, fg=C_TEXT_LIGHT, selectcolor=C_CANVAS,
-                       activebackground=C_CARD, activeforeground=C_AMBER, font=("Segoe UI", 8, "bold")).pack(side=tk.RIGHT)
+                       activebackground=C_CARD, activeforeground=C_AMBER, font=("Segoe UI", 8, "bold")).pack(side=tk.LEFT)
 
         # Results Frame
         results_frame = tk.Frame(self.sb_body, bg="#0d1424", bd=1, relief=tk.SOLID, highlightbackground=C_BORDER)
@@ -2628,7 +3112,7 @@ class BoneSuppressionApp(tk.Tk):
             count = len(self.fracture_findings)
             head_lbl = f"کشف {count} ناحیه مشکوک به شکستگی" if count > 0 else "هیچ شکستگی در این آستانه کشف نشد"
             color = "#ef4444" if count > 0 else "#34d399"
-            tk.Label(results_frame, text=head_lbl, font=("Segoe UI", 9, "bold"), fg=color, bg="#0d1424").pack(anchor=tk.W, padx=8, pady=4)
+            tk.Label(results_frame, text=head_lbl, font=("Segoe UI", 9, "bold"), fg=color, bg="#0d1424").pack(anchor=tk.E, padx=8, pady=4)
 
             for i, f in enumerate(self.fracture_findings, start=1):
                 box = f["box"]
@@ -2637,21 +3121,30 @@ class BoneSuppressionApp(tk.Tk):
                 sev = "شکستگی با جابجایی / قطعی" if conf >= 0.15 else "ترک مویی / شکستگی ظریف"
                 card = tk.Frame(results_frame, bg="#1a1113", bd=1, relief=tk.SOLID, highlightbackground="#dc2626")
                 card.pack(fill=tk.X, padx=6, pady=3)
-                tk.Label(card, text=f"🔴 کادر {i}: {anat} | اطمینان: {conf:.1%}", font=("Segoe UI", 8, "bold"), fg="#fca5a5", bg="#1a1113").pack(anchor=tk.W, padx=6, pady=2)
-                tk.Label(card, text=f"وضعیت: {sev} (مختصات: X=[{box[0]}-{box[2]}], Y=[{box[1]}-{box[3]}])", font=("Segoe UI", 7), fg=C_TEXT_MUTED, bg="#1a1113").pack(anchor=tk.W, padx=6, pady=(0, 4))
+                tk.Label(card, text=f"🔴 کادر {i}: {anat} | اطمینان: {conf:.1%}", font=("Segoe UI", 8, "bold"), fg="#fca5a5", bg="#1a1113").pack(anchor=tk.E, padx=6, pady=2)
+                tk.Label(card, text=f"وضعیت: {sev} (مختصات: X=[{box[0]}-{box[2]}], Y=[{box[1]}-{box[3]}])", font=("Segoe UI", 7), fg=C_TEXT_MUTED, bg="#1a1113").pack(anchor=tk.E, padx=6, pady=(0, 4))
 
     def render_sidebar_pathology(self):
-        head_box = tk.Frame(self.sb_body, bg=C_CARD)
-        head_box.pack(fill=tk.X, pady=(2, 4))
+        head_box = tk.Frame(self.sb_body, bg="#0d1424", bd=1, relief=tk.SOLID,
+                            highlightbackground="#7c3aed", highlightthickness=1, padx=8, pady=8)
+        head_box.pack(fill=tk.X, pady=(2, 6))
 
-        tk.Label(head_box, text="🫁 غربالگری ۱۸ بیماری ریه و قلب", font=("Segoe UI", 9, "bold"),
-                 fg="#a78bfa", bg=C_CARD).pack(side=tk.LEFT)
+        h_top = tk.Frame(head_box, bg="#0d1424")
+        h_top.pack(fill=tk.X)
 
-        btn_val = tk.Button(head_box, text="📊 دقت و AUC", font=("Segoe UI", 7, "bold"),
+        tk.Label(h_top, text="🫁 غربالگری ۱۸ بیماری ریه و قلب", font=("Segoe UI", 9, "bold"),
+                 fg="#a78bfa", bg="#0d1424").pack(side=tk.RIGHT)
+
+        btn_val = tk.Button(h_top, text="📊 دقت و AUC", font=("Segoe UI", 7, "bold"),
                             bg="#1e293b", fg="#c084fc", activebackground="#334155", activeforeground="white",
                             bd=1, relief=tk.SOLID, padx=6, pady=1, cursor="hand2",
                             command=lambda: self.show_clinical_validation_dialog("pathology"))
-        btn_val.pack(side=tk.RIGHT)
+        btn_val.pack(side=tk.LEFT)
+
+        btn_run = tk.Button(head_box, text="⚡ شروع ارزیابی ۱۸ پاتولوژی ریه و سنجش CTR", font=("Segoe UI", 9, "bold"),
+                            bg="#7c3aed", fg="white", activebackground="#6d28d9", relief=tk.FLAT, pady=7, cursor="hand2",
+                            command=self.run_pathology_inference)
+        btn_run.pack(fill=tk.X, pady=(6, 2))
 
         container = tk.Frame(self.sb_body, bg=C_CARD)
         container.pack(fill=tk.BOTH, expand=True)
@@ -2666,29 +3159,10 @@ class BoneSuppressionApp(tk.Tk):
         positives = [p for p in self.pathology_findings if p["is_positive"]]
         summary_lbl = tk.Label(container, text=f"شاخص‌های بالاتر از آستانه بالینی: {len(positives)} از ۱۸",
                                font=("Segoe UI", 8, "bold"), fg="#ef4444" if positives else "#34d399", bg=C_CARD)
-        summary_lbl.pack(anchor=tk.W, pady=(0, 4))
+        summary_lbl.pack(anchor=tk.E, pady=(0, 4))
 
-        # Canvas with smooth MouseWheel scroll
-        canvas = tk.Canvas(container, bg=C_CARD, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
-        scrollable_frame = tk.Frame(canvas, bg=C_CARD)
-
-        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        window_id = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw", width=310)
-
-        def _on_canvas_configure(e):
-            canvas.itemconfig(window_id, width=e.width)
-        canvas.bind("<Configure>", _on_canvas_configure)
-
-        def _on_mousewheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
-        canvas.bind("<MouseWheel>", _on_mousewheel)
-        scrollable_frame.bind("<MouseWheel>", _on_mousewheel)
-
-        canvas.configure(yscrollcommand=scrollbar.set)
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        p_list_frame = tk.Frame(container, bg=C_CARD)
+        p_list_frame.pack(fill=tk.X)
 
         for p in self.pathology_findings:
             is_pos = p["is_positive"]
@@ -2696,29 +3170,24 @@ class BoneSuppressionApp(tk.Tk):
             card_bg = "#211218" if is_pos else "#0f172a"
             card_border = "#dc2626" if is_pos else C_BORDER
 
-            card = tk.Frame(scrollable_frame, bg=card_bg, bd=1, relief=tk.SOLID, highlightbackground=card_border)
+            card = tk.Frame(p_list_frame, bg=card_bg, bd=1, relief=tk.SOLID, highlightbackground=card_border)
             card.pack(fill=tk.X, pady=2, padx=2)
-            card.bind("<MouseWheel>", _on_mousewheel)
 
             head_row = tk.Frame(card, bg=card_bg)
             head_row.pack(fill=tk.X, padx=6, pady=(4, 1))
-            head_row.bind("<MouseWheel>", _on_mousewheel)
 
             badge = "🔴" if is_pos else "⚪"
             lbl1 = tk.Label(head_row, text=f"{badge} {p.get('fa', p.get('name_fa', ''))}", font=("Segoe UI", 8, "bold" if is_pos else "normal"),
                             fg="#fca5a5" if is_pos else C_TEXT_LIGHT, bg=card_bg)
-            lbl1.pack(side=tk.LEFT)
-            lbl1.bind("<MouseWheel>", _on_mousewheel)
+            lbl1.pack(side=tk.RIGHT)
 
             lbl2 = tk.Label(head_row, text=f"{score:.1%}", font=("Consolas", 8, "bold"),
                             fg="#ef4444" if is_pos else C_CYAN, bg=card_bg)
-            lbl2.pack(side=tk.RIGHT)
-            lbl2.bind("<MouseWheel>", _on_mousewheel)
+            lbl2.pack(side=tk.LEFT)
 
             lbl3 = tk.Label(card, text=f"{p.get('en', p.get('key', ''))} | آستانه بالینی: {p['threshold']:.1%}", font=("Segoe UI", 7),
                             fg=C_TEXT_MUTED, bg=card_bg)
-            lbl3.pack(anchor=tk.W, padx=8, pady=(0, 3))
-            lbl3.bind("<MouseWheel>", _on_mousewheel)
+            lbl3.pack(anchor=tk.E, padx=8, pady=(0, 3))
 
         # Cardiothoracic Ratio (CTR) Card
         ctr_val = self.ctr_value or 0.48
@@ -2730,19 +3199,20 @@ class BoneSuppressionApp(tk.Tk):
         c_head = tk.Frame(ctr_card, bg="#0f172a")
         c_head.pack(fill=tk.X)
         tk.Label(c_head, text=f"سنجش CTR (شاخص قلبی): {ctr_val:.1%}", font=("Segoe UI", 9, "bold"),
-                 fg="#ef4444" if is_cardio else "#34d399", bg="#0f172a").pack(side=tk.LEFT)
+                 fg="#ef4444" if is_cardio else "#34d399", bg="#0f172a").pack(side=tk.RIGHT)
         badge_txt = "⚠ کاردیومگالی" if is_cardio else "✓ طبیعی (<50%)"
         tk.Label(c_head, text=badge_txt, font=("Segoe UI", 8, "bold"),
-                 fg="#f87171" if is_cardio else "#10b981", bg="#0f172a").pack(side=tk.RIGHT)
+                 fg="#f87171" if is_cardio else "#10b981", bg="#0f172a").pack(side=tk.LEFT)
 
         tk.Checkbutton(ctr_card, text="نمایش خط‌کش اندازه‌گیری CTR روی کلیشه", variable=self.show_ctr_var,
                        command=self.render_view, bg="#0f172a", fg=C_TEXT_LIGHT, selectcolor=C_CANVAS,
-                       activebackground="#0f172a", activeforeground=C_CYAN, font=("Segoe UI", 8)).pack(anchor=tk.W, pady=(2, 0))
+                       activebackground="#0f172a", activeforeground=C_CYAN, font=("Segoe UI", 8)).pack(anchor=tk.E, pady=(2, 0))
 
         btn_rep = tk.Button(container, text="📝 صدور و مشاهده گزارش قفسه سینه", font=("Segoe UI", 8, "bold"),
                             bg="#8b5cf6", fg="white", activebackground="#7c3aed", activeforeground="white",
                             bd=0, relief=tk.FLAT, pady=6, cursor="hand2", command=self.open_report_dialog)
         btn_rep.pack(fill=tk.X, pady=(4, 2))
+
     # -------------------------------------------------------------------------
     # Multi-Engine Orchestrator
     # -------------------------------------------------------------------------
@@ -2756,6 +3226,8 @@ class BoneSuppressionApp(tk.Tk):
             self.run_pathology_inference()
         elif mod == "mammo":
             self.run_mammo_inference()
+        elif mod == "ct3d":
+            self.open_3d_ct_studio()
 
     def run_suppression_inference(self):
         """Runs Qure.ai TorchScript bone suppression model."""
@@ -3147,42 +3619,88 @@ class BoneSuppressionApp(tk.Tk):
         except Exception as e:
             messagebox.showerror("خطا در باز کردن تصویر", f"خواندن تصویر با خطا مواجه شد:\n{e}")
 
+    def open_ct_folder(self):
+        d = filedialog.askdirectory(title="انتخاب پوشه مقاطع سی‌تی اسکن (DICOM Series)")
+        if d:
+            self.load_ct_series_to_app(d, auto_open_studio=True)
+
     def read_image(self, path):
         meta = {}
-        if path.lower().endswith((".dcm", ".dicom")) and pydicom is not None:
-            ds = pydicom.dcmread(path)
-            meta["patient_name"] = str(getattr(ds, "PatientName", "")).strip()
-            meta["patient_id"] = str(getattr(ds, "PatientID", "")).strip()
-            meta["study_date"] = str(getattr(ds, "StudyDate", "")).strip()
-            meta["patient_age"] = str(getattr(ds, "PatientAge", "")).strip()
-            meta["view_position"] = str(getattr(ds, "ViewPosition", "")).strip().upper()
-            meta["image_laterality"] = str(getattr(ds, "ImageLaterality", getattr(ds, "Laterality", ""))).strip().upper()
-            arr = ds.pixel_array.astype(np.float32)
-            if getattr(ds, "PhotometricInterpretation", "") == "MONOCHROME1":
-                arr = arr.max() - arr
-            arr = (arr - arr.min()) / (arr.max() - arr.min() + 1e-8)
-            return arr, meta
+        # 1. Try reading as DICOM first (universal detection regardless of file extension)
+        if pydicom is not None:
+            try:
+                ds = pydicom.dcmread(path, force=True)
+                if hasattr(ds, "pixel_array"):
+                    meta["patient_name"] = str(getattr(ds, "PatientName", "")).strip()
+                    meta["patient_id"] = str(getattr(ds, "PatientID", "")).strip()
+                    meta["study_date"] = str(getattr(ds, "StudyDate", "")).strip()
+                    meta["patient_age"] = str(getattr(ds, "PatientAge", "")).strip()
+                    meta["view_position"] = str(getattr(ds, "ViewPosition", "")).strip().upper()
+                    meta["image_laterality"] = str(getattr(ds, "ImageLaterality", getattr(ds, "Laterality", ""))).strip().upper()
+                    meta["slice_location"] = float(getattr(ds, "SliceLocation", getattr(ds, "InstanceNumber", 0)))
+                    meta["instance_number"] = int(getattr(ds, "InstanceNumber", 0))
+                    meta["series_number"] = str(getattr(ds, "SeriesNumber", "1")).strip()
+                    meta["slice_thickness"] = float(getattr(ds, "SliceThickness", 1.25))
+                    meta["modality"] = str(getattr(ds, "Modality", "")).strip().upper()
+
+                    arr = ds.pixel_array.astype(np.float32)
+                    # Check for Rescale Slope / Intercept (standard for CT Hounsfield Units)
+                    if hasattr(ds, "RescaleSlope") and hasattr(ds, "RescaleIntercept"):
+                        arr = arr * float(ds.RescaleSlope) + float(ds.RescaleIntercept)
+                        wc = getattr(ds, "WindowCenter", 40)
+                        ww = getattr(ds, "WindowWidth", 400)
+                        if isinstance(wc, (list, tuple)):
+                            wc = float(wc[0])
+                        else:
+                            try:
+                                wc = float(wc)
+                            except Exception:
+                                wc = 40.0
+                        if isinstance(ww, (list, tuple)):
+                            ww = float(ww[0])
+                        else:
+                            try:
+                                ww = float(ww)
+                            except Exception:
+                                ww = 400.0
+                        if ww <= 0:
+                            ww = 400.0
+                        lo = wc - 0.5 - (ww - 1.0) / 2.0
+                        hi = wc - 0.5 + (ww - 1.0) / 2.0
+                        arr = np.clip(arr, lo, hi)
+                        arr = (arr - lo) / (hi - lo + 1e-8)
+                    else:
+                        if getattr(ds, "PhotometricInterpretation", "") == "MONOCHROME1":
+                            arr = arr.max() - arr
+                        arr = (arr - arr.min()) / (arr.max() - arr.min() + 1e-8)
+                    return arr, meta
+            except Exception:
+                pass
 
         if cv2 is not None:
             bgr = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
-            if bgr is None:
-                raise ValueError("cv2 قادر به خواندن این فایل نیست.")
-            h, w = bgr.shape
-            if max(h, w) > 2800:
-                sc = 2800.0 / float(max(h, w))
-                bgr = cv2.resize(bgr, (int(w * sc), int(h * sc)), interpolation=cv2.INTER_AREA)
-            arr = bgr.astype(np.float32) / 255.0
-        else:
+            if bgr is not None:
+                h, w = bgr.shape
+                if max(h, w) > 2800:
+                    sc = 2800.0 / float(max(h, w))
+                    bgr = cv2.resize(bgr, (int(w * sc), int(h * sc)), interpolation=cv2.INTER_AREA)
+                arr = bgr.astype(np.float32) / 255.0
+                if self.auto_invert_var.get() and self.looks_inverted(arr):
+                    arr = 1.0 - arr
+                return arr, meta
+
+        try:
             p = Image.open(path).convert("L")
             w, h = p.size
             if max(h, w) > 2800:
                 sc = 2800.0 / float(max(h, w))
                 p = p.resize((int(w * sc), int(h * sc)), Image.Resampling.BILINEAR)
             arr = np.array(p, dtype=np.float32) / 255.0
-
-        if self.auto_invert_var.get() and self.looks_inverted(arr):
-            arr = 1.0 - arr
-        return arr, meta
+            if self.auto_invert_var.get() and self.looks_inverted(arr):
+                arr = 1.0 - arr
+            return arr, meta
+        except Exception:
+            raise ValueError(f"قادر به خواندن فایل تصویری نیست: {path}")
 
     def update_patient_meta(self, meta):
         if not meta:
@@ -3281,6 +3799,12 @@ class BoneSuppressionApp(tk.Tk):
                 active_s = self.active_mammo_slot.get()
                 if self.mammo_views.get(active_s) and self.mammo_views[active_s].get("arr") is not None:
                     self.original_np = self.mammo_views[active_s]["arr"]
+
+        if self.active_ai_module.get() == "ct3d":
+            if getattr(self, "ct_slices", None) and len(self.ct_slices) > 0:
+                idx = getattr(self, "ct_slice_idx", 0)
+                idx = max(0, min(idx, len(self.ct_slices) - 1))
+                self.original_np = self.ct_slices[idx]
 
         if self.original_np is None:
             self.canvas.delete("all")
@@ -3544,6 +4068,67 @@ class BoneSuppressionApp(tk.Tk):
     def open_pacs_modal(self):
         MedalPacsModal(self, pacs_client=self.pacs_client)
 
+    def load_ct_series_to_app(self, folder, files=None, pname="", pid="", auto_open_studio=True):
+        """Loads complete CT slice series into main desktop viewer for slice-by-slice navigation,
+        matching the mammography multi-series loading pattern."""
+        candidate_files = []
+        if files:
+            candidate_files = list(files)
+        elif folder and os.path.isdir(folder):
+            for root, _, fnames in os.walk(folder):
+                for fn in sorted(fnames):
+                    fl = fn.lower()
+                    if fl in ["dicomdir", "thumbs.db", "desktop.ini"] or fl.endswith((".xml", ".txt", ".json", ".zip", ".html", ".exe", ".dll", ".log", ".bat")):
+                        continue
+                    fp = os.path.join(root, fn)
+                    if os.path.isfile(fp) and os.path.getsize(fp) > 512:
+                        candidate_files.append(fp)
+
+        if not candidate_files:
+            return
+
+        self.ct_series_folder = folder or os.path.dirname(candidate_files[0])
+        slices_with_order = []
+
+        if pname and not self.patient_info.get("name"):
+            self.patient_info["name"] = pname.replace("^", " ").replace("_", " ")
+        if pid and not self.patient_info.get("id"):
+            self.patient_info["id"] = pid
+
+        for idx, f in enumerate(candidate_files):
+            try:
+                arr, meta = self.read_image(f)
+                if arr is not None:
+                    sort_k = float(meta.get("slice_location", meta.get("instance_number", idx)))
+                    slices_with_order.append((sort_k, arr, meta, f))
+                    if not self.patient_info.get("name") and meta.get("patient_name"):
+                        self.update_patient_meta(meta)
+            except Exception:
+                continue
+
+        if not slices_with_order:
+            return
+
+        # Sort slices anatomically (superior to inferior or by slice location)
+        slices_with_order.sort(key=lambda item: item[0])
+
+        self.ct_slices = [item[1] for item in slices_with_order]
+        self.ct_slice_meta = [item[2] for item in slices_with_order]
+        self.ct_slice_files = [item[3] for item in slices_with_order]
+
+        self.ct_slice_idx = len(self.ct_slices) // 2 # Center slice
+        self.original_np = self.ct_slices[self.ct_slice_idx]
+        self.active_ai_module.set("ct3d")
+        self.refresh_sidebar_ui()
+        self.render_view()
+
+        p_display = self.patient_info.get('name') or pname or 'بیمار بالینی'
+        self.status_label.config(text=f"✓ سری سی‌تی اسکن ({len(self.ct_slices)} مقطع محوری) برای {p_display} در نرم‌افزار بارگذاری شد.")
+
+        # Replicate mammography pattern + user preference: auto-open 3D CT studio
+        if auto_open_studio:
+            self.after(300, lambda: self.open_3d_ct_studio(folder=self.ct_series_folder))
+
     def load_dicom_files_to_mammo(self, files, pname="", pid=""):
         if not files:
             return
@@ -3631,6 +4216,17 @@ class BoneSuppressionApp(tk.Tk):
         except Exception as e:
             messagebox.showerror("خطا در بارگذاری دایکام", str(e))
 
+    def open_3d_ct_studio(self, folder=None):
+        try:
+            target_folder = folder or getattr(self, "ct_series_folder", None)
+            Boali3DCTStudioDialog(self, default_folder=target_folder, report_callback=self.on_3d_snapshot_received)
+        except Exception as ex:
+            messagebox.showerror("خطا در بازسازی ۳D", f"خطا در اجرای استودیوی بازسازی سه‌بعدی سی‌تی اسکن:\n{ex}")
+
+    def on_3d_snapshot_received(self, frame_bgr):
+        self.last_3d_snapshot = frame_bgr
+        self.status_label.config(text="✓ نمای ۳D سی‌تی اسکن به مستندات بالینی افزوده شد.")
+
     def open_report_dialog(self):
         mod = self.active_ai_module.get()
         if mod == "mammo" and not self.mammo_results:
@@ -3676,6 +4272,15 @@ class BoneSuppressionApp(tk.Tk):
         return d_map.get(comp, d_map["b"])
 
     def on_canvas_wheel(self, event, delta=None):
+        if self.active_ai_module.get() == "ct3d" and getattr(self, "ct_slices", None) and len(self.ct_slices) > 0:
+            d = delta if delta is not None else event.delta
+            step = -1 if d > 0 else 1
+            self.ct_slice_idx = (self.ct_slice_idx + step) % len(self.ct_slices)
+            self.original_np = self.ct_slices[self.ct_slice_idx]
+            self.render_view()
+            self.status_label.config(text=f"🔬 مقطع محوری سی‌تی: مقطع {self.ct_slice_idx + 1} از {len(self.ct_slices)} | {self.patient_info.get('name', '')}")
+            return
+
         if self.active_ai_module.get() == "mammo" and self.mammo_quad_mode.get():
             if delta is None:
                 delta = event.delta

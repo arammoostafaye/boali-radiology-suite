@@ -1,20 +1,19 @@
 @echo off
 setlocal enabledelayedexpansion
-title BoneSuppression AI - Multi-AI Patch Updater (v2.8.4)
+title نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی (v3.0.2)
 color 0f
 
-set "URL1=https://github.com/arammoostafaye/bone-suppression-chest-xray/releases/download/v2.8.4/BoneSuppressionAI-v2.8.4-Update-Only.zip"
-set "URL2=https://huggingface.co/arammoostafaye/bone-suppression-desktop/resolve/main/BoneSuppressionAI-v2.8.4-Update-Only.zip"
-set "URL3=https://github.com/arammoostafaye/bone-suppression-chest-xray/releases/latest/download/BoneSuppressionAI-Update-Only.zip"
-set "OUT=%~dp0BoneSuppressionAI-v2.8.4-Update-Only.zip"
+set "URL1=https://github.com/arammoostafaye/boali-radiology-suite/releases/download/v3.0.2/Boali_Radiology_Suite_v3.0.2_Update.zip"
+set "URL2=https://github.com/arammoostafaye/boali-radiology-suite/releases/latest/download/Boali_Radiology_Suite_v3.0.2_Update.zip"
+set "OUT=%~dp0Boali_Radiology_Suite_v3.0.2_Update.zip"
 
 echo ======================================================================
-echo   پلتفرم تخصصی هوش مصنوعی رادیولوژی بیمارستان بوعلی مریوان (v2.8.4)
-echo   توسعه‌دهنده: آرام مصطفائی | سامانه دستیار تریاژ و کشف ضایعه (CADe / CADx)
+echo   نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی (v3.0.2)
+echo   توسعه‌دهنده: آرام مصطفائی | سامانه تخصصی هوش مصنوعی و استودیوی سه‌بعدی
 echo ======================================================================
 echo.
-echo  در حال دریافت پکیج سبک آپدیت (~280 مگابایت)...
-echo  (فایل‌های حجیم ۸۳۵ مگابایتی قبلی شما حفظ می‌شوند و مجدداً دانلود نخواهند شد)
+echo  در حال دریافت پکیج سبک آپدیت نگارش v3.0.2...
+echo  (فایل‌های حجیم وزن‌های هوش مصنوعی حفظ می‌شوند و نیازی به دانلود مجدد ندارند)
 echo.
 
 set N=0
@@ -32,19 +31,17 @@ if errorlevel 1 curl -L -C - --retry 5 --retry-all-errors --retry-delay 2 --conn
 
 if not exist "%OUT%" goto loop
 
-REM Check file size (must be at least 250 MB)
-for %%F in ("%OUT%") do set "FSIZE=%%~zF"
-if !FSIZE! LSS 240000000 (
-    echo  فایل به طور کامل دریافت نشده است (!FSIZE! بایت). در حال ادامه دانلود...
-    goto loop
-)
-
 echo.
 echo  [✓] دریافت کامل شد. در حال استخراج بروزرسانی...
 powershell -NoProfile -Command "Expand-Archive -LiteralPath '%OUT%' -DestinationPath '%~dp0' -Force"
 
 if exist "%~dp0BoneSuppressionAI\BoneSuppressionAI.exe" (
     set "APPDIR=%~dp0BoneSuppressionAI"
+    copy /y "%~dp0BoneSuppression_Desktop.py" "%~dp0BoneSuppressionAI\" >nul 2>&1
+    copy /y "%~dp0boali_*.py" "%~dp0BoneSuppressionAI\" >nul 2>&1
+    copy /y "%~dp0pacs_downloader.py" "%~dp0BoneSuppressionAI\" >nul 2>&1
+    copy /y "%~dp0*.bat" "%~dp0BoneSuppressionAI\" >nul 2>&1
+    copy /y "%~dp0config.json" "%~dp0BoneSuppressionAI\" >nul 2>&1
 ) else (
     set "APPDIR=%~dp0"
 )
@@ -53,5 +50,5 @@ echo.
 echo  [✓] اتصال و انتقال مدل‌های قبلی به پوشه برنامه...
 cd /d "%APPDIR%"
 if exist "apply_update.bat" call "apply_update.bat"
-if exist "BoneSuppressionAI.exe" start "" "BoneSuppressionAI.exe"
+if exist "اجرای_نرم_افزار_بوعلی.bat" start "" "اجرای_نرم_افزار_بوعلی.bat"
 exit /b 0

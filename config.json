@@ -1,0 +1,124 @@
+{
+  "app_name": "نرم افزار تخصصی واحد تصویر برداری بیمارستان بوعلی - آرام مصطفائی",
+  "version": "3.0.2",
+  "developer": {
+    "name": "آرام مصطفائی",
+    "role": "پرسنل واحد امور تصویربرداری بیمارستان بوعلی",
+    "organization": "شبکه بهداشت و درمان مریوان",
+    "phones": [
+      "09356808002",
+      "09188766949"
+    ],
+    "email": "arammoostafaye@gmail.com",
+    "github": "https://github.com/arammoostafaye/boali-radiology-suite"
+  },
+  "auth": {
+    "enabled": true,
+    "username": "boalimri.ir",
+    "initial_password_plain": "aram",
+    "password_hash": "912863a494a953280178cd8812895062696e4493e3c764f9e58c49bfaa6cca20"
+  },
+  "engines": {
+    "ct_3d_reconstruction_studio": {
+      "framework": "blinn_phong_volumetric_raymarching",
+      "task": "3d-ct-multi-organ-reconstruction",
+      "version": "3.0.2",
+      "presets": [
+        "BONE_TRAUMA",
+        "CRANIOFACIAL",
+        "SPINE_VERTEBRAE",
+        "PELVIS_ACETABULUM",
+        "VASCULAR_CTA_MIP",
+        "AIRWAY_BRONCHO"
+      ],
+      "features": [
+        "automated_bed_couch_removal",
+        "isotropic_3d_voxel_resampling",
+        "360_degree_rotating_cine_series",
+        "interactive_mouse_wheel_scroll",
+        "stl_3d_printing_mesh_export",
+        "1_click_clinical_reporting_integration"
+      ]
+    },
+    "medal_pacs_integration": {
+      "framework": "automated_http_session_pacs_client",
+      "target_system": "Medal PACS PRO 2024 - Mobile Station",
+      "hospital": "Boali Hospital Marivan",
+      "base_url": "https://marivan-pacs-boali.muk.ac.ir",
+      "features": [
+        "direct_national_id_query",
+        "sms_token_auto_login",
+        "staff_captcha_auth",
+        "direct_series_downloader",
+        "full_resolution_16bit_dicom",
+        "smart_temp_cache_manager"
+      ]
+    },
+    "bone_suppression": {
+      "framework": "torchscript",
+      "task": "image-to-image",
+      "models": [
+        "bone_suppression.ts",
+        "lung_component_suppression.ts"
+      ]
+    },
+    "fracture_ortho": {
+      "framework": "onnx",
+      "model": "fracture_ortho.onnx",
+      "task": "object-detection",
+      "classes": [
+        "fracture"
+      ],
+      "mAP50": 0.92,
+      "precision": 0.903,
+      "recall": 0.832
+    },
+    "chest_pathologies_18": {
+      "framework": "torchscript",
+      "model": "densenet121-res224-all.pt",
+      "task": "multi-label-classification",
+      "pathologies_count": 18,
+      "mean_auc": 0.823
+    },
+    "mammography_birads": {
+      "framework": "deep_resnet50_ai",
+      "task": "density-mass-birads-screening",
+      "views": [
+        "R-CC",
+        "L-CC",
+        "R-MLO",
+        "L-MLO"
+      ],
+      "quad_matrix": true,
+      "features": [
+        "synchronized_mirrored_zoom_pan",
+        "nipple_to_lesion_caliper",
+        "4_view_quad_matrix",
+        "birads_0_to_6"
+      ],
+      "categories": [
+        "ACR_Density",
+        "Mass_Detection",
+        "Microcalcification",
+        "BI_RADS_0_to_6"
+      ]
+    },
+    "clinical_reporting": {
+      "framework": "structured_cad_engine",
+      "template": "Boali_Hospital_Standard",
+      "formats": [
+        "pdf",
+        "docx",
+        "clipboard"
+      ],
+      "features": [
+        "consultant_grade_2page_pdf",
+        "official_boali_hospital_header",
+        "embedded_key_figures_montage",
+        "structured_anatomical_findings",
+        "bilingual_persian_and_english_pacs",
+        "digital_verification_stamp"
+      ]
+    }
+  }
+}

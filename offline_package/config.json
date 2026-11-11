@@ -1,6 +1,6 @@
 {
-  "app_name": "پلتفرم تخصصی هوش مصنوعی رادیولوژی بیمارستان بوعلی مریوان | آرام مصطفائی",
-  "version": "2.8.4",
+  "app_name": "نرم افزار تخصصی واحد تصویر برداری بیمارستان بوعلی - آرام مصطفائی",
+  "version": "3.0.2",
   "developer": {
     "name": "آرام مصطفائی",
     "role": "پرسنل واحد امور تصویربرداری بیمارستان بوعلی",
@@ -10,7 +10,7 @@
       "09188766949"
     ],
     "email": "arammoostafaye@gmail.com",
-    "github": "https://github.com/arammoostafaye"
+    "github": "https://github.com/arammoostafaye/boali-radiology-suite"
   },
   "auth": {
     "enabled": true,
@@ -19,6 +19,27 @@
     "password_hash": "912863a494a953280178cd8812895062696e4493e3c764f9e58c49bfaa6cca20"
   },
   "engines": {
+    "ct_3d_reconstruction_studio": {
+      "framework": "blinn_phong_volumetric_raymarching",
+      "task": "3d-ct-multi-organ-reconstruction",
+      "version": "3.0.2",
+      "presets": [
+        "BONE_TRAUMA",
+        "CRANIOFACIAL",
+        "SPINE_VERTEBRAE",
+        "PELVIS_ACETABULUM",
+        "VASCULAR_CTA_MIP",
+        "AIRWAY_BRONCHO"
+      ],
+      "features": [
+        "automated_bed_couch_removal",
+        "isotropic_3d_voxel_resampling",
+        "360_degree_rotating_cine_series",
+        "interactive_mouse_wheel_scroll",
+        "stl_3d_printing_mesh_export",
+        "1_click_clinical_reporting_integration"
+      ]
+    },
     "medal_pacs_integration": {
       "framework": "automated_http_session_pacs_client",
       "target_system": "Medal PACS PRO 2024 - Mobile Station",
@@ -60,7 +81,7 @@
       "mean_auc": 0.823
     },
     "mammography_birads": {
-      "framework": "opencv_morphology_ai",
+      "framework": "deep_resnet50_ai",
       "task": "density-mass-birads-screening",
       "views": [
         "R-CC",
@@ -86,9 +107,17 @@
       "framework": "structured_cad_engine",
       "template": "Boali_Hospital_Standard",
       "formats": [
+        "pdf",
         "docx",
-        "txt",
         "clipboard"
+      ],
+      "features": [
+        "consultant_grade_2page_pdf",
+        "official_boali_hospital_header",
+        "embedded_key_figures_montage",
+        "structured_anatomical_findings",
+        "bilingual_persian_and_english_pacs",
+        "digital_verification_stamp"
       ]
     }
   }
