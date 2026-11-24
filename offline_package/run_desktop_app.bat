@@ -1,11 +1,11 @@
 @echo off
 chcp 65001 >nul
-title Launch Boali Radiology Suite AI Desktop v3.0.1
+title Launch Boali Radiology Suite AI Desktop v3.0.2
 color 0f
 
 python --version >nul 2>&1
 if %errorlevel% equ 0 (
-    echo [اطلاع] اجرای مستقیم آخرین نسخه پایتون نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی (v3.0.1)...
+    echo [اطلاع] اجرای مستقیم آخرین نسخه پایتون نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی (v3.0.2)...
     start "" pythonw BoneSuppression_Desktop.py
     exit /b 0
 )

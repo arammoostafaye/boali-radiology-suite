@@ -2,7 +2,7 @@
 ================================================================================
 پلتفرم تخصصی هوش مصنوعی رادیولوژی بیمارستان بوعلی مریوان - آرام مصطفائی
 موتور جامع بازسازی سه‌بعدی سی‌تی اسکن (Boali 3D CT Reconstruction Engine)
-نسخه: v3.0.1 (استاندارد طلایی مهندسی پزشکی پکس بیمارستانی - PACS Gold Standard)
+نسخه: v3.0.2 (استاندارد طلایی مهندسی پزشکی پکس بیمارستانی - PACS Gold Standard)
 ================================================================================
 
 مشخصات و قابلیت‌های فنی این ماژول:
@@ -255,7 +255,7 @@ class Boali3DReconstructor:
         self.anterior_vtk = None
         self.render_dz = 0.6           # mm؛ ضخامت voxel در حجم رندر
         self.supersample = 1           # رندر استاندارد ۱× بدون افت عملکرد در سیستم کاربر
-        self.render_smooth_mm = 0.35   # هموارسازی ملایم نویز کرنل تیز (فقط برای DVR)
+        self.render_smooth_mm = 0.60   # هموارسازی ملایم نویز کرنل تیز (فقط برای DVR)
         self._last_backend = "-"
         self.last_render_error = None
         self.volume_iso = None         # آرایه سه‌بعدی با بازنمونه‌برداری ایزوتروپیک
@@ -550,15 +550,16 @@ class Boali3DReconstructor:
                 mapper.SetUseJittering(1)
 
         s = lambda hu: float(hu) + 1024.0
-        # رنگ: عاجی گرم ارگانیک کورتیکال مطابق استاندارد پکس کوثر / هیتاچی (Hitachi Supria Gold / CT-Bone)
+        # رنگ: استخراج استخوان سینماتیک فوق‌پیشرفته مطابق رندرینگ زیمنس سوماتوم (Siemens Cinematic Rendering / Realistic Bone Texture)
         color_func = vtk.vtkColorTransferFunction()
         color_func.AddRGBPoint(0,           0.00, 0.00, 0.00)
-        color_func.AddRGBPoint(s(H - 120),  0.00, 0.00, 0.00)
-        color_func.AddRGBPoint(s(H - 80),   0.68, 0.50, 0.38)   # سایه ملایم کهربایی در شیارها و بافت اسفنجی
-        color_func.AddRGBPoint(s(H),        0.88, 0.78, 0.65)   # بافت ترابکولار و کورتیکال گرم
-        color_func.AddRGBPoint(s(H + 120),  0.96, 0.91, 0.82)   # استخوان کورتیکال عاجی درخشان
-        color_func.AddRGBPoint(s(H + 400),  0.99, 0.96, 0.91)   # کورتکس متراکم
-        color_func.AddRGBPoint(4095,        1.00, 0.99, 0.97)   # های‌لایت کلسیمی
+        color_func.AddRGBPoint(s(H - 140),  0.00, 0.00, 0.00)
+        color_func.AddRGBPoint(s(H - 70),   0.38, 0.22, 0.14)   # سایه عمیق بافت مغز استخوان و فرورفتگی‌ها (Cavity Depth)
+        color_func.AddRGBPoint(s(H - 20),   0.65, 0.46, 0.32)   # ترابکول‌های اسفنجی درونی با گرمای ارگانیک
+        color_func.AddRGBPoint(s(H + 30),   0.89, 0.79, 0.66)   # لایه میانی استخوان ترابکولار
+        color_func.AddRGBPoint(s(H + 140),  0.97, 0.92, 0.84)   # کورتکس متراکم عاجی طبیعی
+        color_func.AddRGBPoint(s(H + 380),  0.99, 0.97, 0.93)   # لبه‌های متراکم کلسیمی درخشان
+        color_func.AddRGBPoint(4095,        1.00, 1.00, 0.98)   # اوج بازتاب استخوانی
 
         opacity_func = vtk.vtkPiecewiseFunction()
         opacity_func.AddPoint(0,            0.00)
@@ -581,10 +582,11 @@ class Boali3DReconstructor:
         prop.SetScalarOpacityUnitDistance(max(min(dx, dy), 0.2))
         prop.ShadeOn()
         prop.SetInterpolationTypeToLinear()
-        prop.SetAmbient(0.38)
-        prop.SetDiffuse(0.68)
-        prop.SetSpecular(0.25)
-        prop.SetSpecularPower(22.0)
+        # تنظیمات سایه‌پردازی استخوان سینماتیک با کنتراست عمقی و برجسته‌سازی ترابکولار
+        prop.SetAmbient(0.32)
+        prop.SetDiffuse(0.74)
+        prop.SetSpecular(0.38)
+        prop.SetSpecularPower(32.0)
 
         volume_actor = vtk.vtkVolume()
         volume_actor.SetMapper(mapper)
@@ -621,8 +623,16 @@ class Boali3DReconstructor:
         fill_light.SetPosition(focal_pt[0] + 400, focal_pt[1] - 400, focal_pt[2] + 400)
         fill_light.SetFocalPoint(*focal_pt)
         fill_light.SetColor(0.85, 0.90, 1.0)
-        fill_light.SetIntensity(0.30)
+        fill_light.SetIntensity(0.32)
         renderer.AddLight(fill_light)
+
+        # نور پس‌زمینه لبه‌ها (Rim / Edge Light) جهت تفکیک سه‌بعدی لبه‌های استخوان از پس‌زمینه تاریک
+        rim_light = vtk.vtkLight()
+        rim_light.SetPosition(focal_pt[0] - 450, focal_pt[1] + 500, focal_pt[2] - 300)
+        rim_light.SetFocalPoint(*focal_pt)
+        rim_light.SetColor(0.70, 0.85, 1.0)
+        rim_light.SetIntensity(0.28)
+        renderer.AddLight(rim_light)
 
         # زاویه دید ثابت ۲۲ درجه با فاصله کروی تحلیلی و مقیاس ثابت
         cam_view_angle = 22.0
@@ -887,7 +897,7 @@ class Boali3DReconstructor:
         cv2.putText(img_bgr, backend, (w - bw - 16, 46),
                     cv2.FONT_HERSHEY_DUPLEX, 0.38, (148, 163, 184), 1, cv2.LINE_AA)
 
-        brand = "Aram Mostafaei | v3.0.1"
+        brand = "Aram Mostafaei | v3.0.2"
         (brw, _), _ = cv2.getTextSize(brand, cv2.FONT_HERSHEY_DUPLEX, 0.38, 1)
         cv2.putText(img_bgr, brand, (w - brw - 16, h - 14),
                     cv2.FONT_HERSHEY_DUPLEX, 0.38, (100, 116, 139), 1, cv2.LINE_AA)

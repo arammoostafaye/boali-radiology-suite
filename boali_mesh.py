@@ -101,8 +101,19 @@ def _select_bone(vol, low, high, spacing, min_mm3=80.0, remove_bed=True, body_fi
             for i, sl in enumerate(ndi.find_objects(lab), start=1):
                 if sl is None or not cand_ok[i]:
                     continue
+                # 1. حذف تخت اسکنر در انتهای کادر تخت
                 if (sl[2].stop - sl[2].start) > 0.75 * X and (sl[1].stop - sl[1].start) < 0.08 * Y and sl[1].stop > 0.85 * Y:
                     cand_ok[i] = False
+                # 2. حذف هوشمند آتل گچی خارجی (Plaster Splint / Cast Removal)
+                # گچ خارجی در بیش از ۴۵٪ حاشیه محیطی‌اش در تماس با هوای اتاق (Air) است
+                elif counts[i] > 10000:
+                    comp = (lab == i)
+                    dil = ndi.binary_dilation(comp, iterations=2)
+                    ring = dil & ~comp
+                    if ring.any():
+                        air_frac = np.mean(vol[ring] < -350.0)
+                        if air_frac > 0.45:
+                            cand_ok[i] = False  # تشخیص قطعی آتل گچی خارجی و کسر آن
             if cand_ok.any():
                 ok = cand_ok
         except Exception:

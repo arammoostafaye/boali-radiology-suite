@@ -1,7 +1,7 @@
 """
 Boali Hospital 3D CT Studio - Standalone Launcher
 نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی
-نسخه v3.0.1
+نسخه v3.0.2
 """
 
 import os

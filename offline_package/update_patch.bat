@@ -1,18 +1,18 @@
 @echo off
 setlocal enabledelayedexpansion
-title نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی (v3.0.1)
+title نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی (v3.0.2)
 color 0f
 
-set "URL1=https://github.com/arammoostafaye/boali-radiology-suite/releases/download/v3.0.1/Boali_Radiology_Suite_v3.0.1_Update.zip"
-set "URL2=https://github.com/arammoostafaye/boali-radiology-suite/releases/latest/download/Boali_Radiology_Suite_v3.0.1_Update.zip"
-set "OUT=%~dp0Boali_Radiology_Suite_v3.0.1_Update.zip"
+set "URL1=https://github.com/arammoostafaye/boali-radiology-suite/releases/download/v3.0.2/Boali_Radiology_Suite_v3.0.2_Update.zip"
+set "URL2=https://github.com/arammoostafaye/boali-radiology-suite/releases/latest/download/Boali_Radiology_Suite_v3.0.2_Update.zip"
+set "OUT=%~dp0Boali_Radiology_Suite_v3.0.2_Update.zip"
 
 echo ======================================================================
-echo   نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی (v3.0.1)
+echo   نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی (v3.0.2)
 echo   توسعه‌دهنده: آرام مصطفائی | سامانه تخصصی هوش مصنوعی و استودیوی سه‌بعدی
 echo ======================================================================
 echo.
-echo  در حال دریافت پکیج سبک آپدیت نگارش v3.0.1...
+echo  در حال دریافت پکیج سبک آپدیت نگارش v3.0.2...
 echo  (فایل‌های حجیم وزن‌های هوش مصنوعی حفظ می‌شوند و نیازی به دانلود مجدد ندارند)
 echo.
 

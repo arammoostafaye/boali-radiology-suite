@@ -2,10 +2,10 @@
 
 # 🩻 نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی
 ## Boali Hospital Specialized Radiology & 3D CT Reconstruction Suite
-### نگارش پایدار و رسمی: `v3.0.1` (به‌روزرسانی جامع نوامبر ۲۰۲۶)
+### نگارش پایدار و رسمی: `v3.0.3` (به‌روزرسانی جامع نوامبر ۲۰۲۶)
 
-[![Release](https://img.shields.io/badge/Release-v3.0.1%20(Updated)-emerald?style=for-the-badge&logo=github)](https://github.com/arammoostafaye/boali-radiology-suite/releases/tag/v3.0.1)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20x64%20(Offline)-blue?style=for-the-badge&logo=windows)](https://github.com/arammoostafaye/boali-radiology-suite/releases/tag/v3.0.1)
+[![Release](https://img.shields.io/badge/Release-v3.0.3%20(Updated)-emerald?style=for-the-badge&logo=github)](https://github.com/arammoostafaye/boali-radiology-suite/releases/tag/v3.0.3)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20x64%20(Offline)-blue?style=for-the-badge&logo=windows)](https://github.com/arammoostafaye/boali-radiology-suite/releases/tag/v3.0.3)
 [![AI Engine](https://img.shields.io/badge/AI%20Engine-PyTorch%20%7C%20ONNX%20%7C%20Pure%20OpenCV%203D-orange?style=for-the-badge&logo=pytorch)](https://pytorch.org/)
 [![Status](https://img.shields.io/badge/Status-Clinical%20Verified-success?style=for-the-badge)](https://github.com/arammoostafaye/boali-radiology-suite)
 [![Reporting](https://img.shields.io/badge/Reporting-Official%20PDF%20%26%20Docx-purple?style=for-the-badge)](https://github.com/arammoostafaye/boali-radiology-suite)
@@ -21,7 +21,7 @@
 
 </div>
 
-## 🌟 آخرین تغییرات و بهبودهای اعمال‌شده در نگارش v3.0.1 (به‌روزرسانی جامع نوامبر ۲۰۲۶)
+## 🌟 آخرین تغییرات و بهبودهای اعمال‌شده در نگارش v3.0.3 (به‌روزرسانی جامع نوامبر ۲۰۲۶)
 
 ### 🚀 ارتقای پایداری گرافیکی، همگام‌سازی کانتکست OpenGL و تصحیح هندسه بالینی:
 1. **رفع قطعی خطای زوم نمایی با اسکرول موس در زاویه ۱۸۰ درجه:**
@@ -82,13 +82,13 @@
 
 ## 📖 معرفی پروژه (Overview)
 
-**نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی (نسخه v3.0.1)** یک پلتفرم جامع، پیشرفته و کاملاً بومی برای سیستم‌عامل ویندوز است که با تجمیع **۶ موتور قدرتمند هوش مصنوعی بالینی و پردازش سه‌بعدی** و **سامانه صدور گزارش خودکار با سربرگ رسمی بیمارستان بوعلی**، به رادیولوژیست‌ها، جراحان ارتوپدی و کارشناسان تصویربرداری در تشخیص سریع، دقیق و بی‌خطای بیماری‌ها کمک می‌کند.
+**نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی (نسخه v3.0.3)** یک پلتفرم جامع، پیشرفته و کاملاً بومی برای سیستم‌عامل ویندوز است که با تجمیع **۶ موتور قدرتمند هوش مصنوعی بالینی و پردازش سه‌بعدی** و **سامانه صدور گزارش خودکار با سربرگ رسمی بیمارستان بوعلی**، به رادیولوژیست‌ها، جراحان ارتوپدی و کارشناسان تصویربرداری در تشخیص سریع، دقیق و بی‌خطای بیماری‌ها کمک می‌کند.
 
 این نرم‌افزار به صورت **۱۰۰٪ آفلاین** (بدون نیاز به اینترنت و بدون ارسال اطلاعات محرمانه بیماران به خارج از بیمارستان) و **بدون نیاز به کارت گرافیک مجزا (CPU-based)** روی سیستم‌های درمانی اجرا می‌شود.
 
 ---
 
-## 🧠 معماری موتورهای هوش مصنوعی و پردازش تصویر (Multi-AI Architecture v3.0.1)
+## 🧠 معماری موتورهای هوش مصنوعی و پردازش تصویر (Multi-AI Architecture v3.0.3)
 
 ```
                                   ┌───► [موتور ۱] حذف استخوان و تفکیک بافت نرم ریه (Qure.ai TorchScript)
@@ -106,7 +106,7 @@
 
 ---
 
-## 🧊 استودیوی جدید بازسازی سه‌بعدی سی‌تی اسکن (New in v3.0.1: 3D CT Reconstruction Studio)
+## 🧊 استودیوی جدید بازسازی سه‌بعدی سی‌تی اسکن (New in v3.0.3: 3D CT Reconstruction Studio)
 
 در نسخه ۳.۰.۰، ماژول اختصاصی بازسازی سه‌بعدی اضافه شده است که مقاطع خام محوری ۲D سی‌تی اسکن را به مدل‌های باکیفیت سه‌بعدی چرخشی تبدیل می‌کند:
 

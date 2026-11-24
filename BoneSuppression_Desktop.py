@@ -192,7 +192,20 @@ DEFAULT_PASS_HASH = "912863a494a953280178cd8812895062696e4493e3c764f9e58c49bfaa6
 HOSPITAL_TITLE = "بیمارستان بوعلی مریوان"
 NETWORK_TITLE = "شبکه بهداشت و درمان مریوان"
 DEVELOPER_NAME = "آرام مصطفائی"
-APP_VERSION = "3.0.1"
+# Dynamic version check with version.txt fallback for compiled standalone .exe
+_v_file_candidate = os.path.join(os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__)), "version.txt")
+if os.path.exists(_v_file_candidate):
+    try:
+        with open(_v_file_candidate, "r", encoding="utf-8") as _vf:
+            _file_ver = _vf.read().strip()
+            if _file_ver:
+                APP_VERSION = _file_ver
+            else:
+                APP_VERSION = "3.0.3"
+    except Exception:
+        APP_VERSION = "3.0.3"
+else:
+    APP_VERSION = "3.0.3"
 APP_NAME_BASE = "نرم افزار تخصصی واحد تصویر برداری بیمارستان بوعلی - آرام مصطفائی"
 APP_TITLE = f"{APP_NAME_BASE} (نگارش v{APP_VERSION})"
 DEVELOPER_ROLE = "پرسنل واحد امور تصویربرداری بیمارستان بوعلی"
@@ -204,13 +217,13 @@ UPSTREAM_SOURCE = "https://huggingface.co/qureaiorg/bone-suppression"
 # -----------------------------------------------------------------------------
 # Modern Dark UI Theme Tokens (Inspired by GPUI / Shadcn / Tailwind Slate)
 # -----------------------------------------------------------------------------
-C_CANVAS        = "#090d16"   # Deepest background
-C_CARD          = "#111827"   # Elevated card background
-C_CARD_HOVER    = "#172236"   # Card hover highlight
-C_HEADER        = "#0f172a"   # Navigation header
-C_TOOLBAR       = "#182234"   # Primary action toolbar
-C_BORDER        = "#27354a"   # Subtle clean borders
-C_BORDER_SUBTLE = "#1e293b"   # Very subtle dividers
+C_CANVAS        = "#050811"   # Deepest Apple midnight glass background
+C_CARD          = "#0d1322"   # Translucent dark frosted card
+C_CARD_HOVER    = "#141c2e"   # Card hover highlight
+C_HEADER        = "#080c16"   # Navigation header
+C_TOOLBAR       = "#0f1626"   # Primary action toolbar
+C_BORDER        = "#1e293b"   # Subtle glowing glass borders
+C_BORDER_SUBTLE = "#162032"   # Very subtle dividers
 C_TEXT_LIGHT    = "#f8fafc"   # Primary text
 C_TEXT_MUTED    = "#94a3b8"   # Secondary text
 C_TEXT_DIM      = "#64748b"   # Tertiary hints
@@ -2339,6 +2352,300 @@ except ImportError:
     except ImportError:
         pass
 
+# =============================================================================
+# Embedded Boali Auto-Updater Engine (100% Zero-Dependency & Self-Contained)
+# =============================================================================
+import os
+import re
+import sys
+import json
+import time
+import zipfile
+import threading
+import urllib.request
+import tkinter as tk
+from tkinter import ttk, messagebox
+
+GITHUB_REPO = "arammoostafaye/boali-radiology-suite"
+GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+
+def parse_version_tuple(v_str):
+    """Convert 'v3.0.3', '3.0.3-beta', or '3.0.2.1' into tuple (3, 0, 2)."""
+    clean = str(v_str).strip().lower().lstrip("v")
+    # extract numeric digit groups
+    nums = re.findall(r'\d+', clean)
+    parts = [int(n) for n in nums]
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts[:3])
+
+class BoaliAutoUpdater:
+    def __init__(self, current_version="3.0.3", root_app=None):
+        self.current_version = current_version
+        self.root_app = root_app
+        self.is_checking = False
+        self.download_in_progress = False
+
+    def check_for_updates_async(self, silent=True, on_complete=None):
+        """Checks for new release in background thread."""
+        if self.is_checking:
+            return
+        self.is_checking = True
+        threading.Thread(
+            target=self._check_worker,
+            args=(silent, on_complete),
+            daemon=True
+        ).start()
+
+    def _check_worker(self, silent, on_complete):
+        try:
+            req = urllib.request.Request(
+                GITHUB_API_URL,
+                headers={"User-Agent": "Boali-Radiology-Suite-Desktop"}
+            )
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+
+            tag_name = data.get("tag_name", "")
+            remote_ver = parse_version_tuple(tag_name)
+            local_ver = parse_version_tuple(self.current_version)
+
+            has_update = remote_ver > local_ver
+            release_notes = data.get("body", "به‌روزرسانی جامع پلتفرم هوش مصنوعی رادیولوژی و استودیوی سه‌بعدی.")
+            
+            # Find the update patch zip asset
+            update_asset_url = None
+            assets = data.get("assets", [])
+            # Priority 1: Patch or Update zip
+            for asset in assets:
+                name = asset.get("name", "")
+                if "Patch.zip" in name or "Update.zip" in name or "Update-Only.zip" in name:
+                    update_asset_url = asset.get("browser_download_url")
+                    break
+            # Priority 2: Any zip if not found
+            if not update_asset_url:
+                for asset in assets:
+                    if asset.get("name", "").endswith(".zip"):
+                        update_asset_url = asset.get("browser_download_url")
+                        break
+
+            if on_complete:
+                if self.root_app:
+                    self.root_app.after(0, lambda: on_complete(has_update, tag_name, release_notes, update_asset_url))
+                else:
+                    on_complete(has_update, tag_name, release_notes, update_asset_url)
+            elif has_update:
+                if self.root_app:
+                    self.root_app.after(0, lambda: self.show_update_dialog(tag_name, release_notes, update_asset_url))
+            elif not silent:
+                if self.root_app:
+                    self.root_app.after(0, lambda: messagebox.showinfo(
+                        "بررسی به‌روزرسانی",
+                        f"شما در حال استفاده از آخرین نگارش نرم‌افزار بوعلی (v{self.current_version}) هستید.\nهیچ آپدیت جدیدی در مخزن وجود ندارد."
+                    ))
+
+        except Exception as e:
+            if not silent:
+                if self.root_app:
+                    self.root_app.after(0, lambda: messagebox.showwarning(
+                        "بررسی به‌روزرسانی",
+                        f"امکان برقراری ارتباط با مخزن گیت‌هاب فراهم نشد:\n{e}"
+                    ))
+        finally:
+            self.is_checking = False
+
+    def show_update_dialog(self, new_version, notes, download_url):
+        """Displays a dedicated dialog asking user to apply update."""
+        parent = self.root_app or tk._default_root
+        dlg = tk.Toplevel(parent)
+        dlg.title("به‌روزرسانی جدید موجود است | نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی")
+        dlg.geometry("560x420")
+        dlg.resizable(False, False)
+        dlg.configure(bg="#0B0F19")
+        dlg.grab_set()
+
+        # Header
+        hdr = tk.Frame(dlg, bg="#111827", height=65)
+        hdr.pack(fill=tk.X)
+
+        tk.Label(
+            hdr,
+            text=f"🚀 نگارش جدید {new_version} آماده دریافت است!",
+            font=("Vazirmatn", 11, "bold"),
+            fg="#38BDF8",
+            bg="#111827"
+        ).pack(anchor=tk.E, padx=16, pady=(12, 2))
+
+        tk.Label(
+            hdr,
+            text=f"نسخه فعلی شما: v{self.current_version} | نسخه منتشرشده در مخزن: {new_version}",
+            font=("Vazirmatn", 8),
+            fg="#94A3B8",
+            bg="#111827"
+        ).pack(anchor=tk.E, padx=16, pady=(0, 10))
+
+        # Body - Release notes
+        body = tk.Frame(dlg, bg="#0B0F19", padx=16, pady=12)
+        body.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(
+            body,
+            text="تغییرات و قابلیت‌های اضافه شده در این نگارش:",
+            font=("Vazirmatn", 9, "bold"),
+            fg="#E2E8F0",
+            bg="#0B0F19"
+        ).pack(anchor=tk.E, pady=(0, 6))
+
+        txt_box = tk.Text(body, bg="#1E293B", fg="#F1F5F9", font=("Vazirmatn", 8),
+                          wrap=tk.WORD, height=9, bd=0, padx=8, pady=8)
+        txt_box.pack(fill=tk.BOTH, expand=True)
+        txt_box.insert(tk.END, notes)
+        txt_box.config(state=tk.DISABLED)
+
+        # Progress bar
+        prog_bar = ttk.Progressbar(body, orient=tk.HORIZONTAL, mode='determinate')
+        lbl_status = tk.Label(body, text="", font=("Vazirmatn", 8), fg="#34D399", bg="#0B0F19")
+
+        # Action Buttons
+        btn_box = tk.Frame(dlg, bg="#111827", height=50)
+        btn_box.pack(fill=tk.X, side=tk.BOTTOM)
+
+        def do_update():
+            if not download_url:
+                messagebox.showerror("خطا", "آدرس دانلود مستقیم پکیج آپدیت یافت نشد.")
+                return
+            btn_update.config(state=tk.DISABLED, bg="#334155")
+            btn_cancel.config(state=tk.DISABLED)
+            prog_bar.pack(fill=tk.X, pady=(10, 4))
+            lbl_status.pack(anchor=tk.E)
+            lbl_status.config(text="در حال دریافت پکیج سبک به‌روزرسانی از گیت‌هاب...")
+
+            threading.Thread(
+                target=self._download_and_extract_patch,
+                args=(download_url, dlg, prog_bar, lbl_status),
+                daemon=True
+            ).start()
+
+        btn_cancel = tk.Button(
+            btn_box,
+            text="بعداً یادآوری کن",
+            font=("Vazirmatn", 9),
+            bg="#334155",
+            fg="#E2E8F0",
+            relief=tk.FLAT,
+            padx=14,
+            pady=5,
+            cursor="hand2",
+            command=dlg.destroy
+        )
+        btn_cancel.pack(side=tk.LEFT, padx=16, pady=10)
+
+        btn_update = tk.Button(
+            btn_box,
+            text="✓ دریافت و به‌روزرسانی خودکار",
+            font=("Vazirmatn", 9, "bold"),
+            bg="#0284C7",
+            fg="#FFFFFF",
+            relief=tk.FLAT,
+            padx=16,
+            pady=5,
+            cursor="hand2",
+            command=do_update
+        )
+        btn_update.pack(side=tk.RIGHT, padx=16, pady=10)
+
+    def _download_and_extract_patch(self, url, dlg, prog_bar, lbl_status):
+        try:
+            exe_dir = os.path.dirname(os.path.abspath(__file__))
+            temp_zip = os.path.join(exe_dir, "temp_update_patch.zip")
+
+            req = urllib.request.Request(url, headers={"User-Agent": "Boali-Radiology-Suite-Desktop"})
+            with urllib.request.urlopen(req) as resp, open(temp_zip, "wb") as out_f:
+                total_len = resp.getheader('content-length')
+                total_bytes = int(total_len) if total_len else 1000000
+                dl = 0
+                while True:
+                    chunk = resp.read(65536)
+                    if not chunk:
+                        break
+                    dl += len(chunk)
+                    out_f.write(chunk)
+                    pct = int(dl * 100 / total_bytes)
+                    prog_bar["value"] = pct
+                    lbl_status.config(text=f"در حال دانلود: {dl // 1024} KB / {total_bytes // 1024} KB ({pct}%)")
+
+            lbl_status.config(text="در حال استخراج و جایگزینی فایل‌های به‌روزرسانی...")
+            time.sleep(0.5)
+
+            with zipfile.ZipFile(temp_zip, "r") as z:
+                z.extractall(exe_dir)
+
+            if os.path.exists(temp_zip):
+                os.remove(temp_zip)
+
+            lbl_status.config(text="✓ به‌روزرسانی با موفقیت انجام شد! در حال راه‌اندازی مجدد...")
+            time.sleep(1.0)
+
+            # Write version.txt immediately to prevent any looping
+            try:
+                with open(os.path.join(exe_dir, "version.txt"), "w", encoding="utf-8") as vf:
+                    vf.write("3.0.3\n")
+            except Exception:
+                pass
+
+            # Restart app
+            messagebox.showinfo(
+                "به‌روزرسانی موفق",
+                "پچ نگارش ۳.۰.۳ با موفقیت روی سیستم شما اعمال شد.\nجهت بارگذاری کامل، نرم‌افزار را مجدداً باز فرمایید."
+            )
+            dlg.destroy()
+            if self.root_app:
+                self.root_app.destroy()
+            
+            # Restart logic compatible with both compiled exe and python scripts
+            if getattr(sys, 'frozen', False):
+                os.execl(sys.executable, sys.executable)
+            else:
+                main_script = os.path.join(exe_dir, "BoneSuppression_Desktop.py")
+                os.execl(sys.executable, sys.executable, main_script)
+
+        except Exception as e:
+            lbl_status.config(text=f"خطا در به‌روزرسانی: {e}", fg="#F87171")
+            messagebox.showerror("خطای به‌روزرسانی", f"فرآیند دانلود یا نصب خودکار با خطا مواجه شد:\n{e}")
+
+
+# ---------------------------------------------------------------------------
+# Convenient Module-Level Functions
+# ---------------------------------------------------------------------------
+_global_updater = None
+
+def get_updater(root_app=None, current_version="3.0.3"):
+    global _global_updater
+    if _global_updater is None:
+        _global_updater = BoaliAutoUpdater(current_version=current_version, root_app=root_app)
+    else:
+        if root_app:
+            _global_updater.root_app = root_app
+        if current_version:
+            _global_updater.current_version = current_version
+    return _global_updater
+
+def check_updates_manual(root_app, current_version="3.0.3"):
+    """بررسی دستی به‌روزرسانی توسط کاربر با نمایش پیام در صورت نبود آپدیت"""
+    updater = get_updater(root_app, current_version)
+    updater.check_for_updates_async(silent=False)
+
+def start_background_update_check(root_app, current_version="3.0.3", delay_sec=4):
+    """بررسی بی‌صدا و نامحسوس آپدیت در پس‌زمینه بعد از اجرای برنامه"""
+    def _delayed():
+        updater = get_updater(root_app, current_version)
+        updater.check_for_updates_async(silent=True)
+    if hasattr(root_app, "after"):
+        root_app.after(int(delay_sec * 1000), _delayed)
+    else:
+        import threading
+        threading.Timer(delay_sec, _delayed).start()
+
 
 class BoneSuppressionApp(tk.Tk):
     """BoneSuppression AI Desktop Workstation with integrated multi-AI suites, 3D CT reconstruction, and dockable sidebar."""
@@ -2449,6 +2756,9 @@ class BoneSuppressionApp(tk.Tk):
         self.init_splash_ui()
         self.init_login_ui()
         self.init_workstation_ui()
+
+        # Start background update check smoothly
+        self._start_auto_update_bg()
 
         # Start with animated splash
         self.show_splash()
@@ -2615,31 +2925,55 @@ class BoneSuppressionApp(tk.Tk):
     # Workstation UI & Multi-AI Sidebar
     # -------------------------------------------------------------------------
     def init_workstation_ui(self):
-        # 1. Header Bar
-        header_bar = tk.Frame(self.main_container, bg=C_HEADER, height=44, bd=0)
-        header_bar.pack(fill=tk.X, side=tk.TOP)
+        # 1. Apple macOS / iOS 2026 Top Bar with Central Floating Dynamic Island
+        header_bar = tk.Frame(self.main_container, bg="#050811", height=50, bd=0)
+        header_bar.pack(fill=tk.X, side=tk.TOP, padx=12, pady=(6, 2))
 
-        right_header = tk.Frame(header_bar, bg=C_HEADER)
-        right_header.pack(side=tk.RIGHT, padx=12, pady=6)
+        # Left branding (macOS style window indicators & hospital badge)
+        brand_frame = tk.Frame(header_bar, bg="#050811")
+        brand_frame.pack(side=tk.LEFT, fill=tk.Y)
 
-        brand_frame = tk.Frame(header_bar, bg=C_HEADER)
-        brand_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=14, pady=6)
+        tk.Label(brand_frame, text="", font=("Segoe UI", 13), fg="#94a3b8", bg="#050811").pack(side=tk.LEFT, padx=(4, 8))
+        tk.Label(brand_frame, text="Boali Hospital", font=("Segoe UI", 10, "bold"), fg="#f8fafc", bg="#050811").pack(side=tk.LEFT, padx=(0, 6))
+        tk.Label(brand_frame, text="بیمارستان بوعلی مریوان", font=("Vazirmatn", 8), fg="#64748b", bg="#050811").pack(side=tk.LEFT, padx=(0, 10))
 
-        tk.Label(brand_frame, text=f"🏥 {APP_NAME_BASE} (نگارش v{APP_VERSION})",
-                 font=("Segoe UI", 11, "bold"), fg=C_CYAN, bg=C_HEADER, anchor="w").pack(side=tk.LEFT)
+        # Right side: User pill, updater button, about & logout
+        right_header = tk.Frame(header_bar, bg="#050811")
+        right_header.pack(side=tk.RIGHT, fill=tk.Y)
 
-        tk.Label(right_header, text="👤 boalimri.ir", font=("Segoe UI", 9, "bold"), fg="#10b981", bg="#0b0f19",
-                 padx=8, pady=3, bd=1, relief=tk.SOLID, highlightbackground=C_BORDER, highlightthickness=1).pack(side=tk.LEFT, padx=6)
+        user_pill = tk.Frame(right_header, bg="#0d1424", bd=1, relief=tk.SOLID,
+                             highlightbackground="#1e293b", highlightthickness=1)
+        user_pill.pack(side=tk.LEFT, padx=6, pady=4)
+        tk.Label(user_pill, text="● boalimri.ir", font=("Segoe UI", 8, "bold"), fg="#34d399", bg="#0d1424", padx=10, pady=3).pack(side=tk.LEFT)
 
-        btn_about = create_modern_button(right_header, "ℹ️ درباره نرم‌افزار", self.open_about,
-                                         bg=C_BLUE, hover_bg=C_BLUE_HOVER, font=("Segoe UI", 8, "bold"), padx=10, pady=3)
-        btn_about.pack(side=tk.LEFT, padx=4)
+        btn_update = create_modern_button(right_header, "🔄 به‌روزرسانی", self.check_app_updates,
+                                          bg="#1e293b", hover_bg="#0284c7", font=("Segoe UI", 8, "bold"), padx=10, pady=3)
+        btn_update.pack(side=tk.LEFT, padx=3)
 
-        btn_logout = create_modern_button(right_header, "🔒 خروج", self.on_logout,
-                                          bg=C_SLATE, hover_bg=C_RED, font=("Segoe UI", 8), padx=8, pady=3)
-        btn_logout.pack(side=tk.LEFT, padx=4)
+        btn_about = create_modern_button(right_header, "ℹ️ درباره", self.open_about,
+                                         bg="#1e293b", hover_bg="#334155", font=("Segoe UI", 8), padx=10, pady=3)
+        btn_about.pack(side=tk.LEFT, padx=3)
 
-        tk.Frame(self.main_container, bg=C_BORDER, height=1).pack(fill=tk.X, side=tk.TOP)
+        btn_logout = create_modern_button(right_header, "خروج", self.on_logout,
+                                          bg="#1e293b", hover_bg="#ef4444", font=("Segoe UI", 8), padx=10, pady=3)
+        btn_logout.pack(side=tk.LEFT, padx=3)
+
+        # Center: Apple Dynamic Island Capsule
+        island_frame = tk.Frame(header_bar, bg="#000000", bd=1, relief=tk.SOLID,
+                                highlightbackground="#27354a", highlightthickness=1)
+        island_frame.pack(side=tk.LEFT, expand=True, pady=2)
+
+        tk.Label(island_frame, text="●", font=("Segoe UI", 8), fg="#38bdf8", bg="#000000").pack(side=tk.LEFT, padx=(14, 4))
+        self.lbl_dynamic_island = tk.Label(
+            island_frame,
+            text=f"Boali Hospital Radiology AI Workstation (v{APP_VERSION})",
+            font=("Segoe UI", 9, "bold"),
+            fg="#f8fafc",
+            bg="#000000",
+            padx=8,
+            pady=4
+        )
+        self.lbl_dynamic_island.pack(side=tk.LEFT, padx=(0, 14))
 
         # 2. Main Toolbar
         toolbar = tk.Frame(self.main_container, bg=C_TOOLBAR, height=48)
@@ -2707,29 +3041,37 @@ class BoneSuppressionApp(tk.Tk):
 
         self.init_sidebar_content()
 
-        # 4. Bottom Navigation & Status Bar
-        bottom_bar = tk.Frame(self.main_container, bg=C_HEADER, height=44, bd=1, relief=tk.SOLID,
-                              highlightbackground=C_BORDER, highlightthickness=1)
-        bottom_bar.pack(fill=tk.X, side=tk.BOTTOM, padx=0, pady=0)
+        # 4. Apple iOS 2026 Bottom Floating Glass Strip (Series & Viewport Modes)
+        bottom_bar = tk.Frame(self.main_container, bg="#080c16", height=46, bd=1, relief=tk.SOLID,
+                              highlightbackground="#1e293b", highlightthickness=1)
+        bottom_bar.pack(fill=tk.X, side=tk.BOTTOM, padx=8, pady=(2, 6))
 
-        modes_box = tk.Frame(bottom_bar, bg=C_HEADER)
-        modes_box.pack(side=tk.LEFT, padx=10, pady=6)
+        # Viewport Mode Segmented Pill
+        modes_pill = tk.Frame(bottom_bar, bg="#000000", bd=1, relief=tk.SOLID,
+                              highlightbackground="#1e293b", highlightthickness=1)
+        modes_pill.pack(side=tk.LEFT, padx=8, pady=4)
 
-        tk.Radiobutton(modes_box, text="اسلایدر مقایسه‌ای (Curtain)", variable=self.view_mode, value="split",
-                       command=self.render_view, bg=C_HEADER, fg=C_TEXT_LIGHT, selectcolor=C_CANVAS,
-                       activebackground=C_HEADER, activeforeground=C_CYAN, font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=8)
+        tk.Radiobutton(modes_pill, text="اسلایدر پرده‌ای (Curtain)", variable=self.view_mode, value="split",
+                       command=self.render_view, bg="#000000", fg="#f8fafc", selectcolor="#0284c7",
+                       activebackground="#000000", activeforeground="#38bdf8", font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=4, pady=2)
 
-        tk.Radiobutton(modes_box, text="کنار هم (Side-by-Side)", variable=self.view_mode, value="dual",
-                       command=self.render_view, bg=C_HEADER, fg=C_TEXT_LIGHT, selectcolor=C_CANVAS,
-                       activebackground=C_HEADER, activeforeground=C_CYAN, font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=8)
+        tk.Radiobutton(modes_pill, text="کنار هم (Side-by-Side)", variable=self.view_mode, value="dual",
+                       command=self.render_view, bg="#000000", fg="#f8fafc", selectcolor="#0284c7",
+                       activebackground="#000000", activeforeground="#38bdf8", font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=4, pady=2)
 
-        tk.Radiobutton(modes_box, text="۴ پنل همزمان (Quad)", variable=self.view_mode, value="quad",
-                       command=self.render_view, bg=C_HEADER, fg=C_TEXT_LIGHT, selectcolor=C_CANVAS,
-                       activebackground=C_HEADER, activeforeground=C_CYAN, font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=8)
+        tk.Radiobutton(modes_pill, text="۴ نمایه مامو/سی‌تی (Quad)", variable=self.view_mode, value="quad",
+                       command=self.render_view, bg="#000000", fg="#f8fafc", selectcolor="#0284c7",
+                       activebackground="#000000", activeforeground="#38bdf8", font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=4, pady=2)
 
-        self.status_label = tk.Label(bottom_bar, text="آماده جهت بارگذاری کلیشه رادیوگرافی",
-                                     font=("Segoe UI", 9), fg=C_CYAN, bg=C_HEADER)
-        self.status_label.pack(side=tk.RIGHT, padx=14, pady=6)
+        # Center subtle footer tags (matching preview mockup footer)
+        footer_tags = tk.Frame(bottom_bar, bg="#080c16")
+        footer_tags.pack(side=tk.LEFT, expand=True)
+        tk.Label(footer_tags, text="Precision Imaging  •  Smarter Diagnosis  •  Healthier Tomorrows",
+                 font=("Segoe UI", 8), fg="#64748b", bg="#080c16").pack()
+
+        self.status_label = tk.Label(bottom_bar, text="آماده جهت بارگذاری کلیشه رادیوگرافی و دایکام",
+                                     font=("Segoe UI", 8, "bold"), fg="#34d399", bg="#080c16")
+        self.status_label.pack(side=tk.RIGHT, padx=12, pady=6)
 
     def init_sidebar_content(self):
         # 1. Header of Sidebar - Sleek Dark Medical Style
@@ -2745,48 +3087,52 @@ class BoneSuppressionApp(tk.Tk):
         tk.Label(h_content, text="واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی", font=("Segoe UI", 8),
                  fg=C_TEXT_MUTED, bg=C_HEADER).pack(anchor=tk.E)
 
-        # 2. Segmented AI Module Selector - Modern 2-Row / 2-Column Structured Grid
-        selector_frame = tk.Frame(self.sidebar_frame, bg="#0b111e", pady=8, padx=8, bd=1, relief=tk.SOLID,
-                                  highlightbackground=C_BORDER, highlightthickness=1)
-        selector_frame.pack(fill=tk.X, padx=10, pady=(8, 4))
+        # 2. Apple iOS 2026 Segmented AI Modules (Vertical Floating Frosted Cards)
+        selector_frame = tk.Frame(self.sidebar_frame, bg="#0d1322", pady=4, padx=6)
+        selector_frame.pack(fill=tk.X, padx=10, pady=(6, 2))
 
-        tk.Label(selector_frame, text="انتخاب ماژول تخصصی (Clinical AI Suite):", font=("Segoe UI", 8, "bold"),
-                 fg=C_CYAN, bg="#0b111e").pack(anchor=tk.E, padx=4, pady=(0, 6))
+        # Top pill switch header: AI Modules | Tools | Report
+        pill_nav = tk.Frame(selector_frame, bg="#070b13", bd=1, relief=tk.SOLID,
+                            highlightbackground="#1e293b", highlightthickness=1)
+        pill_nav.pack(fill=tk.X, pady=(2, 8))
 
-        grid_btns = tk.Frame(selector_frame, bg="#0b111e")
-        grid_btns.pack(fill=tk.X)
-        grid_btns.columnconfigure(0, weight=1)
-        grid_btns.columnconfigure(1, weight=1)
+        tk.Label(pill_nav, text="AI Modules", font=("Segoe UI", 8, "bold"), fg="#ffffff", bg="#0284c7", padx=14, pady=3).pack(side=tk.LEFT, padx=2, pady=2)
+        tk.Label(pill_nav, text="Tools", font=("Segoe UI", 8), fg="#94a3b8", bg="#070b13", padx=10, pady=3).pack(side=tk.LEFT, padx=2, pady=2)
+        tk.Label(pill_nav, text="Auto Report", font=("Segoe UI", 8), fg="#94a3b8", bg="#070b13", padx=10, pady=3).pack(side=tk.LEFT, padx=2, pady=2)
+
+        cards_list = tk.Frame(selector_frame, bg="#0d1322")
+        cards_list.pack(fill=tk.X)
 
         self.mod_btns = {}
-        # Define 5 modules with clinical icons, Persian titles, and active glowing themes
+        # Apple iOS 2026 Module Definitions (Icon, Title, Subtitle, Accent Color)
         modules_cfg = [
-            ("suppress", "🩻 بافت نرم ریه", 0, 0, "#059669"),
-            ("fracture", "🦴 کشف شکستگی", 0, 1, "#d97706"),
-            ("pathology", "🫁 ۱۸ بیماری & CTR", 1, 0, "#7c3aed"),
-            ("mammo", "🩺 ماموگرافی ۴ نمایه", 1, 1, "#db2777"),
-            ("ct3d", "🧊 استودیوی ۳D سی‌تی اسکن", 2, 0, "#0284c7"),
+            ("suppress", "🫁 Bone Suppression", "AI-powered soft tissue reconstruction", "#0284c7"),
+            ("fracture", "🦴 Fracture Detection", "Detect and classify bone fractures with AI", "#0d9488"),
+            ("mammo", "🩺 Mammography AI", "CADe/CADx 4-view screening assistant", "#be185d"),
+            ("ct3d", "🧊 3D CT Reconstruction", "Volumetric Cinematic 3D Studio & Cine", "#6366f1"),
+            ("pathology", "🔬 18 Pathologies & CTR", "Deep thoracic screening & cardiothoracic ratio", "#7c3aed"),
         ]
 
-        for mod_id, mod_label, r, c, acc_color in modules_cfg:
-            colspan = 2 if mod_id == "ct3d" else 1
-            btn = tk.Button(
-                grid_btns,
-                text=mod_label,
+        for mod_id, mod_label, mod_sub, acc_color in modules_cfg:
+            card_btn = tk.Button(
+                cards_list,
+                text=f"{mod_label}  •  {mod_sub}",
                 font=("Segoe UI", 8, "bold" if mod_id == "suppress" else "normal"),
-                bg=acc_color if mod_id == "suppress" else "#1e293b",
-                fg="white" if mod_id == "suppress" else C_TEXT_LIGHT,
+                justify=tk.LEFT,
+                anchor="w",
+                bg=acc_color if mod_id == "suppress" else "#141c2e",
+                fg="#ffffff" if mod_id == "suppress" else "#cbd5e1",
                 activebackground=acc_color,
-                activeforeground="white",
+                activeforeground="#ffffff",
                 relief=tk.FLAT,
-                bd=0,
-                padx=8,
-                pady=7,
+                bd=1,
+                padx=12,
+                pady=6,
                 cursor="hand2",
                 command=lambda m=mod_id: self.select_ai_module(m)
             )
-            btn.grid(row=r, column=c, columnspan=colspan, sticky="nsew", padx=2, pady=2)
-            self.mod_btns[mod_id] = btn
+            card_btn.pack(fill=tk.X, pady=2)
+            self.mod_btns[mod_id] = card_btn
 
         # Divider line
         tk.Frame(self.sidebar_frame, bg=C_BORDER, height=1).pack(fill=tk.X, padx=10, pady=4)
@@ -2854,17 +3200,17 @@ class BoneSuppressionApp(tk.Tk):
     def select_ai_module(self, mod_id):
         self.active_ai_module.set(mod_id)
         colors = {
-            "suppress": "#059669",
-            "fracture": "#d97706",
-            "pathology": "#7c3aed",
-            "mammo": "#db2777",
-            "ct3d": "#0284c7"
+            "suppress": "#0284c7",
+            "fracture": "#0d9488",
+            "mammo": "#be185d",
+            "ct3d": "#6366f1",
+            "pathology": "#7c3aed"
         }
         for mid, btn in self.mod_btns.items():
             if mid == mod_id:
-                btn.config(bg=colors.get(mid, C_BLUE), fg="white", font=("Segoe UI", 8, "bold"))
+                btn.config(bg=colors.get(mid, C_BLUE), fg="#ffffff", font=("Segoe UI", 8, "bold"))
             else:
-                btn.config(bg="#1e293b", fg=C_TEXT_LIGHT, font=("Segoe UI", 8, "normal"))
+                btn.config(bg="#141c2e", fg="#94a3b8", font=("Segoe UI", 8, "normal"))
 
         # Update Main Run Button Text
         if mod_id == "suppress":
@@ -3539,6 +3885,18 @@ class BoneSuppressionApp(tk.Tk):
     # -------------------------------------------------------------------------
     # Auxiliary Methods & Viewer Rendering
     # -------------------------------------------------------------------------
+    def check_app_updates(self):
+        """بررسی دستی به‌روزرسانی نرم‌افزار از مخزن گیت‌هاب"""
+        if check_updates_manual:
+            check_updates_manual(self, current_version=APP_VERSION)
+        else:
+            messagebox.showinfo("به‌روزرسانی", "ماژول به‌روزرسانی خودکار در دسترس نیست.")
+
+    def _start_auto_update_bg(self):
+        """بررسی نامحسوس پس‌زمینه در هنگام شروع به کار نرم‌افزار"""
+        if start_background_update_check:
+            start_background_update_check(self, current_version=APP_VERSION, delay_sec=4)
+
     def open_about(self):
         ModernAboutDialog(self)
 

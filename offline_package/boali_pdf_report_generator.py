@@ -1,7 +1,7 @@
 """
 Boali Hospital Radiology AI Platform - Official PDF Clinical Report Generator
 نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی
-نسخه v3.0.1
+نسخه v3.0.2
 
 Consultant-Grade Bilingual Clinical PDF Report Generator matching official hospital template.
 Developer: آرام مصطفائی (Aram Mostafaei)

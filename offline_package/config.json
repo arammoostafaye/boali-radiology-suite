@@ -1,6 +1,6 @@
 {
   "app_name": "نرم افزار تخصصی واحد تصویر برداری بیمارستان بوعلی - آرام مصطفائی",
-  "version": "3.0.1",
+  "version": "3.0.3",
   "developer": {
     "name": "آرام مصطفائی",
     "role": "پرسنل واحد امور تصویربرداری بیمارستان بوعلی",
@@ -22,7 +22,7 @@
     "ct_3d_reconstruction_studio": {
       "framework": "blinn_phong_volumetric_raymarching",
       "task": "3d-ct-multi-organ-reconstruction",
-      "version": "3.0.1",
+      "version": "3.0.3",
       "presets": [
         "BONE_TRAUMA",
         "CRANIOFACIAL",

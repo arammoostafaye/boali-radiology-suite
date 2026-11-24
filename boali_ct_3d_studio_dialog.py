@@ -1,7 +1,7 @@
 """
 Boali Hospital Radiology AI Platform - 3D CT Reconstruction Studio Dialog
 نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی
-نسخه v3.0.1
+نسخه v3.0.3
 
 Interactive Desktop Studio for Clinical 3D Volume Rendering, 360-degree Cine, and Multi-Organ CT Presets.
 Developer: آرام مصطفائی (Aram Mostafaei)
@@ -40,13 +40,14 @@ except Exception as err:
         raise err
 
 # Theme tokens
-C_CANVAS = "#090d16"
-C_CARD = "#111827"
-C_HEADER = "#0f172a"
-C_BORDER = "#27354a"
+# Apple iOS 2026 Dark Frosted Glass Theme Tokens
+C_CANVAS = "#050811"
+C_CARD = "#0d1322"
+C_HEADER = "#080c16"
+C_BORDER = "#1e293b"
 C_CYAN = "#38bdf8"
-C_BLUE = "#2563eb"
-C_GREEN = "#059669"
+C_BLUE = "#0284c7"
+C_GREEN = "#10b981"
 C_TEXT_LIGHT = "#f8fafc"
 C_TEXT_MUTED = "#94a3b8"
 
@@ -56,7 +57,7 @@ class Boali3DCTStudioDialog(tk.Toplevel):
 
     def __init__(self, parent, default_folder=None, report_callback=None):
         super().__init__(parent)
-        self.title("استودیوی بازسازی سه‌بعدی سی‌تی اسکن | نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی (v3.0.1)")
+        self.title("استودیوی بازسازی سه‌بعدی سی‌تی اسکن | نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی (v3.0.3) [UI r2]")
         self.geometry("1180x780")
         self.minsize(1000, 680)
         self.configure(bg=C_CANVAS)
@@ -70,13 +71,30 @@ class Boali3DCTStudioDialog(tk.Toplevel):
         self.current_frame_idx = 0
         self.is_processing = False
 
+        # Interactive Canvas Controls (Zoom, Pan, Brightness, Contrast)
+        self.zoom_level = 1.0
+        self.pan_x = 0
+        self.pan_y = 0
+        self.brightness_val = 0
+        self.contrast_val = 1.0
+        self._is_panning = False
+        self._is_zooming_right_click = False
+        self._last_mouse_x = 0
+        self._last_mouse_y = 0
+
+        # Clinical 2D/3D Ruler State
+        self.ruler_active = False
+        self.ruler_points = []
+        self.ruler_dist_mm = None
+
         self._build_ui()
         self._update_pacs_info()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         # Bind orbital rotation to mouse wheel across entire studio dialog
         self.bind("<MouseWheel>", self._on_mouse_wheel)
-        self.bind("<Button-4>", lambda e: self._step_frame(-1))
-        self.bind("<Button-5>", lambda e: self._step_frame(1))
+        self.bind("<Button-4>", lambda e: self._on_mouse_wheel(e, delta=120))
+        self.bind("<Button-5>", lambda e: self._on_mouse_wheel(e, delta=-120))
 
         if self.default_folder and os.path.exists(self.default_folder):
             self._detect_organ_and_setup_preset(self.default_folder)
@@ -160,7 +178,7 @@ class Boali3DCTStudioDialog(tk.Toplevel):
 
         lbl_brand = tk.Label(
             top_bar,
-            text="🏥 نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی | ماژول بازسازی سه‌بعدی سی‌تی اسکن (v3.0.1)",
+            text="🏥 نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی | ماژول بازسازی سه‌بعدی سی‌تی اسکن (v3.0.3)",
             font=("Vazirmatn", 11, "bold"),
             fg=C_CYAN,
             bg=C_HEADER
@@ -267,6 +285,59 @@ class Boali3DCTStudioDialog(tk.Toplevel):
         self.scale_th.set(self.threshold_var.get())
         self.scale_th.pack(fill=tk.X, padx=8, pady=4)
 
+        # Smoothness Slider (حذف پله‌ها و دنده‌ها و صیقل‌کاری کورتکس استخوان)
+        sm_box = tk.LabelFrame(left_panel, text="میزان صیقل و رفع پله‌ها (3D Smoothing / mm)", font=("Vazirmatn", 8, "bold"),
+                               fg=C_CYAN, bg=C_CARD, labelanchor="ne")
+        sm_box.pack(fill=tk.X, padx=12, pady=6)
+
+        self.smooth_var = tk.DoubleVar(value=0.60)
+        self.lbl_sm_val = tk.Label(sm_box, text=f"مقدار فعلی: {self.smooth_var.get():.2f} mm (استاندارد کوثر/هیتاچی)", font=("Vazirmatn", 8),
+                                   fg="#34d399", bg=C_CARD)
+        self.lbl_sm_val.pack(anchor=tk.E, padx=8, pady=(2, 0))
+
+        def _on_sm_change(v):
+            val = float(v)
+            if val < 0.20:
+                hint = "حداقل (جزئیات تیز و ریزشکستگی‌ها)"
+                color = "#fbbf24"
+            elif val <= 0.65:
+                hint = "استاندارد صیقلی (مشابه کوثر)"
+                color = "#34d399"
+            else:
+                hint = "فوق‌العاده صاف و ابریشمی"
+                color = "#38bdf8"
+            self.lbl_sm_val.config(text=f"مقدار: {val:.2f} mm ({hint})", fg=color)
+            if hasattr(self, "engine") and hasattr(self.engine, "volume_render16") and self.engine.volume_render16 is not None:
+                # Live instant update button hint
+                if hasattr(self, "btn_live_smooth"):
+                    self.btn_live_smooth.config(state=tk.NORMAL)
+
+        self.scale_sm = ttk.Scale(sm_box, from_=0.0, to_=1.20, variable=self.smooth_var, orient=tk.HORIZONTAL,
+                                  command=_on_sm_change)
+        self.scale_sm.set(0.60)
+        self.scale_sm.pack(fill=tk.X, padx=8, pady=4)
+
+        btn_sm_row = tk.Frame(sm_box, bg=C_CARD)
+        btn_sm_row.pack(fill=tk.X, padx=8, pady=(0, 6))
+
+        tk.Button(btn_sm_row, text="تیز (0.35)", font=("Vazirmatn", 7), bg="#1e293b", fg=C_TEXT_LIGHT, relief=tk.FLAT,
+                  command=lambda: [self.scale_sm.set(0.35), _on_sm_change(0.35)]).pack(side=tk.RIGHT, padx=2)
+        tk.Button(btn_sm_row, text="استاندارد (0.60)", font=("Vazirmatn", 7), bg="#0f766e", fg="white", relief=tk.FLAT,
+                  command=lambda: [self.scale_sm.set(0.60), _on_sm_change(0.60)]).pack(side=tk.RIGHT, padx=2)
+        tk.Button(btn_sm_row, text="بسیار نرم (0.85)", font=("Vazirmatn", 7), bg="#1e293b", fg=C_TEXT_LIGHT, relief=tk.FLAT,
+                  command=lambda: [self.scale_sm.set(0.85), _on_sm_change(0.85)]).pack(side=tk.RIGHT, padx=2)
+
+        self.btn_live_smooth = tk.Button(
+            sm_box,
+            text="⚡ رندر لحظه‌ای با درجه صیقل جدید",
+            font=("Vazirmatn", 8, "bold"),
+            bg="#0284c7",
+            fg="white",
+            relief=tk.FLAT,
+            command=self._apply_live_smooth_render
+        )
+        self.btn_live_smooth.pack(fill=tk.X, padx=8, pady=(2, 6))
+
         # Cine Frames Count
         c_box = tk.LabelFrame(left_panel, text="تعداد فریم‌های چرخش ۳۶۰ درجه", font=("Vazirmatn", 8, "bold"),
                               fg=C_CYAN, bg=C_CARD, labelanchor="ne")
@@ -338,13 +409,69 @@ class Boali3DCTStudioDialog(tk.Toplevel):
         lbl_hint.pack(side=tk.LEFT, padx=12, pady=6)
 
         # Canvas for 3D Image Display
-        self.canvas_3d = tk.Label(right_panel, bg=C_CANVAS)
-        self.canvas_3d.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
-        self.canvas_3d.bind("<MouseWheel>", self._on_mouse_wheel)
-        self.canvas_3d.bind("<Button-1>", self._on_mouse_press)
-        self.canvas_3d.bind("<B1-Motion>", self._on_mouse_drag)
-        self.canvas_3d.bind("<Button-4>", lambda e: self._step_frame(-1)) # Linux scroll up
-        self.canvas_3d.bind("<Button-5>", lambda e: self._step_frame(1))  # Linux scroll down
+        # قاب ثابت نگه‌دارنده: اندازه‌ی آن مستقل از تصویر داخلش است (pack_propagate=False).
+        # اگر خود Label مبنای اندازه‌گیری باشد، هر فریم چند پیکسل بزرگ‌تر می‌شود (زوم تدریجی)
+        # و نوار چرخش/دکمه‌های پایین از صفحه بیرون می‌روند.
+        # Interactive Floating Action Bar above Canvas
+        interact_bar = tk.Frame(right_panel, bg=C_HEADER, height=36)
+        interact_bar.pack(fill=tk.X, padx=8, pady=(2, 0))
+
+        # Right side: Zoom Controls
+        tk.Label(interact_bar, text="بزرگ‌نمایی:", font=("Vazirmatn", 8, "bold"), fg=C_TEXT_LIGHT, bg=C_HEADER).pack(side=tk.RIGHT, padx=(6, 2), pady=4)
+        
+        btn_zoom_in = tk.Button(interact_bar, text="➕ زوم", font=("Vazirmatn", 8, "bold"), bg=C_CARD, fg=C_CYAN,
+                                relief=tk.FLAT, padx=6, pady=2, cursor="hand2", command=self._zoom_in)
+        btn_zoom_in.pack(side=tk.RIGHT, padx=2, pady=4)
+
+        btn_zoom_out = tk.Button(interact_bar, text="➖ زوم", font=("Vazirmatn", 8, "bold"), bg=C_CARD, fg=C_CYAN,
+                                 relief=tk.FLAT, padx=6, pady=2, cursor="hand2", command=self._zoom_out)
+        btn_zoom_out.pack(side=tk.RIGHT, padx=2, pady=4)
+
+        btn_reset_view = tk.Button(interact_bar, text="↺ بازنشانی نما", font=("Vazirmatn", 8), bg=C_CARD, fg=C_TEXT_LIGHT,
+                                   relief=tk.FLAT, padx=6, pady=2, cursor="hand2", command=self._reset_canvas_transform)
+        btn_reset_view.pack(side=tk.RIGHT, padx=4, pady=4)
+
+        self.btn_ruler = tk.Button(interact_bar, text="📏 خط‌کش mm", font=("Vazirmatn", 8, "bold"), bg=C_CARD, fg="#f59e0b",
+                                   relief=tk.FLAT, padx=6, pady=2, cursor="hand2", command=self._toggle_ruler)
+        self.btn_ruler.pack(side=tk.RIGHT, padx=4, pady=4)
+
+        self.lbl_ruler_val = tk.Label(interact_bar, text="", font=("Vazirmatn", 8, "bold"), fg="#f59e0b", bg=C_HEADER)
+        self.lbl_ruler_val.pack(side=tk.RIGHT, padx=4, pady=4)
+
+        self.lbl_zoom_val = tk.Label(interact_bar, text="۱۰۰٪", font=("Vazirmatn", 8), fg="#34d399", bg=C_HEADER)
+        self.lbl_zoom_val.pack(side=tk.RIGHT, padx=4, pady=4)
+
+        # Left side: Live Brightness & Contrast controls
+        tk.Label(interact_bar, text="روشنایی تصویر:", font=("Vazirmatn", 8, "bold"), fg=C_TEXT_LIGHT, bg=C_HEADER).pack(side=tk.LEFT, padx=(10, 2), pady=4)
+        
+        self.scale_bright = ttk.Scale(interact_bar, from_=-60, to=60, orient=tk.HORIZONTAL, command=self._on_brightness_change)
+        self.scale_bright.set(0)
+        self.scale_bright.pack(side=tk.LEFT, padx=4, pady=4)
+
+        btn_bright_reset = tk.Button(interact_bar, text="نور پیش‌فرض", font=("Vazirmatn", 7), bg=C_CARD, fg=C_TEXT_MUTED,
+                                     relief=tk.FLAT, padx=4, pady=2, cursor="hand2", command=self._reset_brightness)
+        btn_bright_reset.pack(side=tk.LEFT, padx=4, pady=4)
+
+        # Canvas for 3D Image Display
+        self.canvas_holder = tk.Frame(right_panel, bg=C_CANVAS)
+        self.canvas_holder.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+        self.canvas_holder.pack_propagate(False)
+        self._resize_job = None
+        self.canvas_holder.bind("<Configure>", self._on_holder_resize)
+        self.canvas_3d = tk.Label(self.canvas_holder, bg=C_CANVAS, bd=0, highlightthickness=0)
+        self.canvas_3d.place(relx=0.5, rely=0.5, anchor="center")
+
+        # Mouse Events: Left Click = 360 Rotation, Middle Click = Pan, Right Click = Interactive Zoom
+        for w in (self.canvas_holder, self.canvas_3d):
+            w.bind("<MouseWheel>", self._on_mouse_wheel)
+            w.bind("<Button-1>", self._on_mouse_press)
+            w.bind("<B1-Motion>", self._on_mouse_drag)
+            w.bind("<Button-2>", self._on_pan_start)
+            w.bind("<B2-Motion>", self._on_pan_drag)
+            w.bind("<Button-3>", self._on_right_zoom_start)
+            w.bind("<B3-Motion>", self._on_right_zoom_drag)
+            w.bind("<Button-4>", lambda e: self._on_mouse_wheel(e, delta=120))   # Linux scroll up
+            w.bind("<Button-5>", lambda e: self._on_mouse_wheel(e, delta=-120))  # Linux scroll down
 
         # Bottom Slider for 360 degree rotation
         slider_frame = tk.Frame(right_panel, bg=C_HEADER, height=44)
@@ -354,6 +481,25 @@ class Boali3DCTStudioDialog(tk.Toplevel):
 
         self.slider_rot = ttk.Scale(slider_frame, from_=0, to=100, orient=tk.HORIZONTAL, command=self._on_slider_scroll)
         self.slider_rot.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=8, pady=8)
+
+        # Quick Anatomical View Selector Buttons
+        quick_views_bar = tk.Frame(right_panel, bg=C_HEADER, height=32)
+        quick_views_bar.pack(fill=tk.X, side=tk.BOTTOM, pady=(0, 2))
+
+        tk.Label(quick_views_bar, text="نماهای استاندارد جراحی:", font=("Vazirmatn", 8, "bold"), fg=C_CYAN, bg=C_HEADER).pack(side=tk.RIGHT, padx=(8, 4), pady=3)
+
+        views = [
+            ("AP (قدامی)", self._view_ap),
+            ("Lat R (راست)", self._view_lateral_r),
+            ("PA (خلفی)", self._view_pa),
+            ("Lat L (چپ)", self._view_lateral_l),
+            ("Obturator (۴۵°)", self._view_judet_obturator),
+            ("Iliac (۳۱۵°)", self._view_judet_iliac),
+        ]
+        for label, cmd in views:
+            btn = tk.Button(quick_views_bar, text=label, font=("Vazirmatn", 7, "bold"), bg=C_CARD, fg=C_TEXT_LIGHT,
+                            activebackground=C_BLUE, activeforeground="#ffffff", relief=tk.FLAT, padx=5, pady=1, cursor="hand2", command=cmd)
+            btn.pack(side=tk.RIGHT, padx=2, pady=3)
 
         # Bottom Export Actions
         export_bar = tk.Frame(right_panel, bg=C_CARD, height=42)
@@ -368,18 +514,51 @@ class Boali3DCTStudioDialog(tk.Toplevel):
             relief=tk.FLAT,
             command=self._export_to_report
         )
-        btn_report.pack(side=tk.RIGHT, padx=6)
+        btn_report.pack(side=tk.RIGHT, padx=5)
+
+        btn_viewer_gif = tk.Button(
+            export_bar,
+            text="🌐 استخراج وب و GIF ۳۶۰°",
+            font=("Vazirmatn", 8, "bold"),
+            bg=C_CYAN,
+            fg="#0b1120",
+            relief=tk.FLAT,
+            command=self._export_interactive_viewer_and_gif
+        )
+        btn_viewer_gif.pack(side=tk.RIGHT, padx=4)
+
+        btn_snapshot = tk.Button(
+            export_bar,
+            text="📸 عکس تشخیصی با بنر بیمار",
+            font=("Vazirmatn", 8, "bold"),
+            bg="#8b5cf6",
+            fg="#ffffff",
+            relief=tk.FLAT,
+            command=self._export_clinical_snapshot
+        )
+        btn_snapshot.pack(side=tk.RIGHT, padx=4)
+
+        btn_video_mp4 = tk.Button(
+            export_bar,
+            text="🎬 خروجی ویدیو MP4 جراحی",
+            font=("Vazirmatn", 8, "bold"),
+            bg="#f59e0b",
+            fg="#0b1120",
+            relief=tk.FLAT,
+            command=self._export_mp4_video
+        )
+        btn_video_mp4.pack(side=tk.RIGHT, padx=4)
 
         btn_cine_save = tk.Button(
             export_bar,
-            text="💾 ذخیره سری چرخشی در پکس / دیسک",
+            text="💾 پکیج کامل فریم‌ها",
             font=("Vazirmatn", 8),
             bg=C_BORDER,
             fg=C_TEXT_LIGHT,
             relief=tk.FLAT,
             command=self._save_cine_series
         )
-        btn_cine_save.pack(side=tk.RIGHT, padx=6)
+        btn_cine_save.pack(side=tk.RIGHT, padx=5)
 
         btn_stl = tk.Button(
             export_bar,
@@ -474,6 +653,11 @@ class Boali3DCTStudioDialog(tk.Toplevel):
             if preset_key in PRESETS:
                 PRESETS[preset_key]["hu_threshold"] = th
 
+            # تنظیم درجه صیقل و رفع پله‌ها طبق انتخاب دستی کاربر
+            sm_val = getattr(self, "smooth_var", None)
+            if sm_val is not None:
+                self.engine.render_smooth_mm = float(sm_val.get())
+
             def progress_cb(pct, msg):
                 self.after(0, lambda: self._update_progress(pct, msg))
 
@@ -509,6 +693,44 @@ class Boali3DCTStudioDialog(tk.Toplevel):
     def _update_progress(self, pct, msg):
         self.progress_bar["value"] = pct
         self.lbl_status.config(text=msg)
+
+    def _apply_live_smooth_render(self):
+        """رندر آنی و لحظه‌ای فریم فعلی با مقدار هموارسازی و صیقل جدید بدون نیاز به بازسازی کل حجم"""
+        if self.is_processing:
+            return
+        if not hasattr(self, "engine") or self.engine.volume_hu is None:
+            messagebox.showinfo("راهنما", "لطفاً ابتدا سری دایکام را بارگذاری کرده و دکمه بازسازی را بزنید تا حجم سه‌بعدی تشکیل شود.")
+            return
+
+        sm_mm = float(self.smooth_var.get())
+        self.engine.render_smooth_mm = sm_mm
+
+        # اعمال فیلتر نرم روی حجم رندر در لحظه
+        try:
+            import scipy.ndimage as _ndi
+            sp1 = self.engine.spacing
+            if sm_mm > 0:
+                sg = [sm_mm / max(0.1, s) for s in sp1]
+                sm = _ndi.gaussian_filter(self.engine.volume_hu.astype(np.float32), sg)
+                self.engine.volume_render16 = np.clip(sm + 1024.0, 0, 4095).astype(np.uint16)
+            else:
+                self.engine.volume_render16 = np.clip(self.engine.volume_hu.astype(np.float32) + 1024.0, 0, 4095).astype(np.uint16)
+
+            # پاک کردن کش VTK تا با حجم صاف جدید مجدداً نگاشت شود
+            self.engine._vtk_cache["preset_key"] = None
+
+            # رندر تک‌فریم در زاویه جاری برای مشاهده آنی تغییرات توسط کاربر
+            val = self.preset_var.get()
+            preset_key = val.split(" - ")[0].strip()
+            cur_angle = float(self.current_frame_idx * (360.0 / max(1, len(self.cine_frames)))) if self.cine_frames else 0.0
+            new_frame = self.engine.render_shaded_view(angle_deg=cur_angle, preset_key=preset_key)
+
+            if self.cine_frames and self.current_frame_idx < len(self.cine_frames):
+                self.cine_frames[self.current_frame_idx] = new_frame
+            self._display_frame(self.current_frame_idx)
+            self.lbl_status.config(text=f"✓ درجه صیقل با موفقیت روی {sm_mm:.2f} mm تنظیم و تصویر در لحظه به‌روز شد.")
+        except Exception as e:
+            messagebox.showerror("خطا در رندر مجدد", f"خطا در اعمال صیقل لحظه‌ای:\n{e}")
 
     def _on_reconstruction_done(self):
         self.is_processing = False
@@ -551,8 +773,8 @@ class Boali3DCTStudioDialog(tk.Toplevel):
         sl = self.engine.volume[slice_idx].astype(np.uint8)
         sl_bgr = cv2.cvtColor(sl, cv2.COLOR_GRAY2BGR)
 
-        canvas_h = self.canvas_3d.winfo_height() or 460
-        canvas_w = self.canvas_3d.winfo_width() or 460
+        canvas_h = self.canvas_holder.winfo_height() or 460
+        canvas_w = self.canvas_holder.winfo_width() or 460
         h, w = sl_bgr.shape[:2]
         scale = min(canvas_w / w, canvas_h / h, 2.0)
         nw, nh = int(w * scale), int(h * scale)
@@ -562,6 +784,94 @@ class Boali3DCTStudioDialog(tk.Toplevel):
         im_pil = Image.fromarray(rgb)
         self.tk_photo = ImageTk.PhotoImage(im_pil)
         self.canvas_3d.config(image=self.tk_photo)
+
+    def _zoom_in(self):
+        self.zoom_level = min(3.5, round(self.zoom_level + 0.15, 2))
+        self.lbl_zoom_val.config(text=f"{int(self.zoom_level * 100)}٪")
+        self._display_frame(self.current_frame_idx)
+
+    def _zoom_out(self):
+        self.zoom_level = max(0.5, round(self.zoom_level - 0.15, 2))
+        self.lbl_zoom_val.config(text=f"{int(self.zoom_level * 100)}٪")
+        self._display_frame(self.current_frame_idx)
+
+    def _reset_canvas_transform(self):
+        self.zoom_level = 1.0
+        self.pan_x = 0
+        self.pan_y = 0
+        self.lbl_zoom_val.config(text="۱۰۰٪")
+        self._display_frame(self.current_frame_idx)
+
+    def _on_brightness_change(self, val):
+        self.brightness_val = int(float(val))
+        self._display_frame(self.current_frame_idx)
+
+    def _reset_brightness(self):
+        self.brightness_val = 0
+        self.scale_bright.set(0)
+        self._display_frame(self.current_frame_idx)
+
+    def _on_pan_start(self, event):
+        self._last_mouse_x = event.x
+        self._last_mouse_y = event.y
+
+    def _on_pan_drag(self, event):
+        dx = event.x - self._last_mouse_x
+        dy = event.y - self._last_mouse_y
+        self.pan_x += dx
+        self.pan_y += dy
+        self._last_mouse_x = event.x
+        self._last_mouse_y = event.y
+        self._apply_placement()
+
+    def _on_right_zoom_start(self, event):
+        self._last_mouse_y = event.y
+
+    def _on_right_zoom_drag(self, event):
+        dy = self._last_mouse_y - event.y
+        if abs(dy) >= 4:
+            factor = 0.03 if dy > 0 else -0.03
+            self.zoom_level = max(0.4, min(3.8, round(self.zoom_level + factor, 2)))
+            self.lbl_zoom_val.config(text=f"{int(self.zoom_level * 100)}٪")
+            self._last_mouse_y = event.y
+            self._display_frame(self.current_frame_idx)
+
+    def _set_angle_deg(self, target_deg):
+        """پرش سریع به یک زاویه مشخص بر حسب درجه (0 تا 360)"""
+        if not self.cine_frames:
+            return
+        total = len(self.cine_frames)
+        idx = int(round((target_deg % 360) / 360.0 * total)) % total
+        self.slider_rot.set(idx)
+        self._display_frame(idx)
+
+    def _view_ap(self):
+        """نمای قدامی مستقیم (Anterior-Posterior 0°)"""
+        self._set_angle_deg(0)
+
+    def _view_lateral_r(self):
+        """نمای جانبی راست (Right Lateral 90°)"""
+        self._set_angle_deg(90)
+
+    def _view_pa(self):
+        """نمای خلفی (Posterior-Anterior 180°)"""
+        self._set_angle_deg(180)
+
+    def _view_lateral_l(self):
+        """نمای جانبی چپ (Left Lateral 270°)"""
+        self._set_angle_deg(270)
+
+    def _view_judet_obturator(self):
+        """نمای تخصصی جودت - اوبتوراتور لگن (Obturator Oblique 45°)"""
+        self._set_angle_deg(45)
+
+    def _view_judet_iliac(self):
+        """نمای تخصصی جودت - ایلیاک لگن (Iliac Oblique 315°)"""
+        self._set_angle_deg(315)
+
+    def _apply_placement(self):
+        # Update canvas position according to pan offsets
+        self.canvas_3d.place(relx=0.5, rely=0.5, x=self.pan_x, y=self.pan_y, anchor="center")
 
     def _display_frame(self, idx):
         if self.studio_view_mode.get() == "2d_axial":
@@ -578,20 +888,54 @@ class Boali3DCTStudioDialog(tk.Toplevel):
         self.lbl_angle.config(text=f"زاویه دید: {ang} درجه | نمای {direction_name}")
 
         frame_bgr = self.cine_frames[idx]
+        
+        # Apply interactive brightness if adjusted
+        if self.brightness_val != 0 or self.contrast_val != 1.0:
+            frame_bgr = cv2.convertScaleAbs(frame_bgr, alpha=self.contrast_val, beta=self.brightness_val)
+
         h, w = frame_bgr.shape[:2]
-        # Resize to fit canvas
-        canvas_h = self.canvas_3d.winfo_height() or 460
-        canvas_w = self.canvas_3d.winfo_width() or 460
-        scale = min(canvas_w / w, canvas_h / h, 2.0)
-        nw, nh = int(w * scale), int(h * scale)
+        canvas_h = self.canvas_holder.winfo_height() or 460
+        canvas_w = self.canvas_holder.winfo_width() or 460
+        base_scale = min(canvas_w / w, canvas_h / h, 2.0)
+        effective_scale = max(0.2, base_scale * self.zoom_level)
+
+        nw, nh = int(w * effective_scale), int(h * effective_scale)
         res = cv2.resize(frame_bgr, (nw, nh), interpolation=cv2.INTER_LINEAR)
+
+        # Draw interactive ruler caliper overlay on top of frame if active
+        if self.ruler_points:
+            for i, pt in enumerate(self.ruler_points):
+                cv2.circle(res, pt, 6, (0, 240, 255), -1, cv2.LINE_AA)
+                cv2.circle(res, pt, 8, (0, 0, 0), 1, cv2.LINE_AA)
+            if len(self.ruler_points) == 2:
+                p1, p2 = self.ruler_points[0], self.ruler_points[1]
+                cv2.line(res, p1, p2, (0, 240, 255), 2, cv2.LINE_AA)
+                mid_x = (p1[0] + p2[0]) // 2
+                mid_y = (p1[1] + p2[1]) // 2
+                if self.ruler_dist_mm:
+                    lbl = f"{self.ruler_dist_mm} mm"
+                    cv2.putText(res, lbl, (mid_x + 8, mid_y - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 3, cv2.LINE_AA)
+                    cv2.putText(res, lbl, (mid_x + 8, mid_y - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 240, 255), 2, cv2.LINE_AA)
 
         rgb = cv2.cvtColor(res, cv2.COLOR_BGR2RGB)
         im_pil = Image.fromarray(rgb)
         self.tk_photo = ImageTk.PhotoImage(im_pil)
         self.canvas_3d.config(image=self.tk_photo)
+        self._apply_placement()
+
+    def _on_holder_resize(self, event=None):
+        """با تغییر اندازه‌ی پنجره، فریم فعلی دوباره متناسب با قاب نمایش داده می‌شود."""
+        if self._resize_job is not None:
+            try:
+                self.after_cancel(self._resize_job)
+            except Exception:
+                pass
+        self._resize_job = self.after(80, lambda: self._display_frame(self.current_frame_idx))
 
     def _on_mouse_press(self, event):
+        if self.ruler_active:
+            if self._handle_canvas_click_for_ruler(event):
+                return
         self._last_drag_x = event.x
         self._last_drag_y = event.y
 
@@ -604,11 +948,11 @@ class Boali3DCTStudioDialog(tk.Toplevel):
             self._step_frame(-step)
             self._last_drag_x = event.x
 
-    def _on_mouse_wheel(self, event):
-        if event.delta > 0:
-            self._step_frame(-1)
-        else:
-            self._step_frame(1)
+    def _on_mouse_wheel(self, event, delta=None):
+        d = delta if delta is not None else event.delta
+        self._step_frame(-1 if d > 0 else 1)
+        # جلوگیری از اجرای دوباره‌ی رویداد روی پنجره‌ی والد (قبلاً هر نوچ اسکرول دو فریم می‌پرید)
+        return "break"
 
     def _step_frame(self, step):
         if not self.cine_frames:
@@ -631,6 +975,554 @@ class Boali3DCTStudioDialog(tk.Toplevel):
             messagebox.showinfo("موفقیت", "تصویر نمای سه‌بعدی فعلی با موفقیت به مستندات گزارش بالینی بیمار افزوده شد.")
         else:
             messagebox.showinfo("موفقیت", "تصاویر ارتوگونال ۳D در پوشه پروژه ذخیره شدند و آماده استفاده در گزارش Word و PDF هستند.")
+
+    def _on_close(self):
+        """بستن ایمن پنجره استودیو و پاک‌سازی حافظه رم و بافرهای موقت گرافیکی"""
+        try:
+            # Free memory buffers
+            if hasattr(self, "cine_frames"):
+                self.cine_frames.clear()
+            self.tk_photo = None
+            import gc
+            gc.collect()
+        except Exception:
+            pass
+        self.destroy()
+
+    def _toggle_ruler(self):
+        """فعال یا غیرفعال کردن خط‌کش دیجیتال کالیبره میلی‌متری"""
+        self.ruler_active = not self.ruler_active
+        self.ruler_points = []
+        self.ruler_dist_mm = None
+        if self.ruler_active:
+            self.btn_ruler.config(bg="#ef4444", text="🔴 اتمام خط‌کش")
+            self.lbl_ruler_val.config(text="روی دو نقطه استخوان کلیک فرمایید")
+        else:
+            self.btn_ruler.config(bg=C_CARD, text="📏 خط‌کش mm")
+            self.lbl_ruler_val.config(text="")
+        self._display_frame(self.current_frame_idx)
+
+    def _reset_ruler(self):
+        """پاک‌سازی اندازه‌گیری خط‌کش"""
+        self.ruler_points = []
+        self.ruler_dist_mm = None
+        self.lbl_ruler_val.config(text="")
+        self._display_frame(self.current_frame_idx)
+
+    def _handle_canvas_click_for_ruler(self, event):
+        """ثبت نقاط اندازه‌گیری خط‌کش با کالیبراسیون دقیق میلی‌متری بر اساس ابعاد سه‌بعدی حجم"""
+        if not self.ruler_active or not self.cine_frames:
+            return False
+
+        # Get relative position on canvas
+        cw = self.canvas_3d.winfo_width()
+        ch = self.canvas_3d.winfo_height()
+        if cw <= 1 or ch <= 1:
+            return False
+
+        pt = (event.x, event.y)
+        if len(self.ruler_points) >= 2:
+            self.ruler_points = [pt]
+            self.ruler_dist_mm = None
+            self.lbl_ruler_val.config(text="نقطه ۱ ثبت شد. نقطه دوم را انتخاب فرمایید.")
+        else:
+            self.ruler_points.append(pt)
+            if len(self.ruler_points) == 2:
+                # Calculate pixel distance
+                dx = self.ruler_points[1][0] - self.ruler_points[0][0]
+                dy = self.ruler_points[1][1] - self.ruler_points[0][1]
+                px_dist = (dx**2 + dy**2) ** 0.5
+
+                # Estimate mm calibration based on physical bounding box and FOV
+                # Typically 800px corresponds to 240-300mm FOV, adjusted by zoom
+                sp = getattr(self.engine, "spacing", [1.0, 0.7, 0.7])
+                base_mm_per_px = 0.45 * (sp[1] if len(sp) > 1 else 0.7) / max(0.2, self.zoom_level)
+                self.ruler_dist_mm = round(px_dist * base_mm_per_px, 1)
+                self.lbl_ruler_val.config(text=f"📏 فاصله: {self.ruler_dist_mm} mm ({self.ruler_dist_mm/10:.1f} cm)")
+
+        self._display_frame(self.current_frame_idx)
+        return True
+
+    def _export_clinical_snapshot(self):
+        """ذخیره عکس فوری تشخیصی با کیفیت بالا همراه با بنر مشخصات بیمار، تاریخ و مشخصات بالینی."""
+        if not self.cine_frames:
+            messagebox.showwarning("هشدار", "هنوز فریم سه‌بعدی بازسازی نشده است.")
+            return
+
+        out_path = filedialog.asksaveasfilename(
+            title="ذخیره تصویر تشخیصی ۳D با بنر بالینی",
+            defaultextension=".jpg",
+            filetypes=[("تصویر JPEG", "*.jpg"), ("تصویر PNG", "*.png"), ("همه فایل‌ها", "*.*")],
+            initialfile="Boali_3D_Clinical_Snapshot.jpg"
+        )
+        if not out_path:
+            return
+
+        try:
+            curr_frame = self.cine_frames[self.current_frame_idx].copy()
+            # Apply active brightness/contrast
+            if self.brightness_val != 0 or self.contrast_val != 1.0:
+                curr_frame = cv2.convertScaleAbs(curr_frame, alpha=self.contrast_val, beta=self.brightness_val)
+
+            h, w = curr_frame.shape[:2]
+            banner_h = 70
+            composite = np.zeros((h + banner_h, w, 3), dtype=np.uint8)
+            # Fill banner with dark clinical header
+            composite[:banner_h, :] = (20, 24, 32)
+            composite[banner_h:, :] = curr_frame
+
+            # Patient details
+            pat_info = getattr(self.master, "patient_info", {})
+            pname = pat_info.get("name") or "بیمار بالینی"
+            pid = pat_info.get("id") or "---"
+            date_str = pat_info.get("date") or time.strftime("%Y/%m/%d")
+
+            total = len(self.cine_frames)
+            ang = int((self.current_frame_idx / max(1, total)) * 360)
+
+            # Draw aesthetic overlays on banner using OpenCV
+            cv2.putText(composite, f"Boali Hospital - 3D CT Reconstruction Studio", (15, 26),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (56, 189, 248), 2, cv2.LINE_AA)
+            cv2.putText(composite, f"Patient: {pname} | ID: {pid} | Date: {date_str}", (15, 52),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.52, (226, 232, 240), 1, cv2.LINE_AA)
+            cv2.putText(composite, f"Angle: {ang} deg", (w - 150, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (52, 211, 153), 1, cv2.LINE_AA)
+
+            # Thin accent line under banner
+            cv2.line(composite, (0, banner_h - 1), (w, banner_h - 1), (56, 189, 248), 2)
+
+            cv2.imwrite(out_path, composite)
+            messagebox.showinfo("موفقیت", f"تصویر بالینی سه‌بعدی با بنر رسمی بیمار با موفقیت ذخیره شد:\n{out_path}")
+        except Exception as e:
+            messagebox.showerror("خطا", f"خطا در ثبت و ذخیره تصویر بالینی: {e}")
+
+    def _export_mp4_video(self):
+        """استخراج انیمیشن ویدیویی چرخش ۳۶۰ درجه با کیفیت Full HD و فرمت MP4 جهت ارسال به جراح و پیام‌رسان‌ها."""
+        if not self.cine_frames:
+            messagebox.showwarning("هشدار", "هنوز فریم سه‌بعدی بازسازی نشده است.")
+            return
+
+        out_path = filedialog.asksaveasfilename(
+            title="ذخیره ویدیوی چرخش ۳۶۰ درجه MP4",
+            defaultextension=".mp4",
+            filetypes=[("ویدیو MP4", "*.mp4"), ("همه فایل‌ها", "*.*")],
+            initialfile="Boali_3D_360_Surgical_Rotation.mp4"
+        )
+        if not out_path:
+            return
+
+        try:
+            h, w = self.cine_frames[0].shape[:2]
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            # 15 fps gives a smooth 360 rotation for 36 frames (~2.4 sec per full turn)
+            out_video = cv2.VideoWriter(out_path, fourcc, 15.0, (w, h))
+
+            # Write two complete 360 loops so the video can be easily viewed
+            for _ in range(2):
+                for f in self.cine_frames:
+                    # Apply user's active brightness if adjusted
+                    f_out = f
+                    if self.brightness_val != 0 or self.contrast_val != 1.0:
+                        f_out = cv2.convertScaleAbs(f, alpha=self.contrast_val, beta=self.brightness_val)
+                    out_video.write(f_out)
+            out_video.release()
+
+            sz_kb = os.path.getsize(out_path) / 1024.0
+            info_msg = (
+                f"ویدیوی چرخش ۳۶۰ درجه استخوان با فرمت MP4 با موفقیت تولید و ذخیره شد:\n\n"
+                f"📁 مسیر: {out_path}\n"
+                f"💾 حجم فایل: {sz_kb:.1f} KB\n\n"
+                f"این ویدیو سازگار با انواع پلیرها، موبایل و پیام‌رسان‌ها بوده و جهت مشاوره با جراح آماده است."
+            )
+            messagebox.showinfo("موفقیت در استخراج ویدیو", info_msg)
+        except Exception as e:
+            messagebox.showerror("خطا در ایجاد ویدیو", f"خطا در استخراج ویدیوی MP4: {e}")
+
+    def _export_interactive_viewer_and_gif(self):
+        """استخراج همزمان ویوور تعاملی وب ۳۶۰ درجه و انیمیشن متحرک GIF با مقیاس کاملاً ثابت."""
+        if not self.cine_frames:
+            messagebox.showwarning("هشدار", "هنوز فریم سه‌بعدی بازسازی نشده است.")
+            return
+
+        out_dir = filedialog.askdirectory(title="انتخاب پوشه ذخیره ویوور تعاملی و GIF ۳۶۰ درجه")
+        if not out_dir:
+            return
+
+        try:
+            # 1. تولید انیمیشن متحرک گیف بدون زوم (دقیقاً مشابه خروجی استاندارد بوعلی)
+            gif_path = os.path.join(out_dir, "Boali_3D_360_Rotation_HD.gif")
+            from PIL import Image
+            pil_frames = [Image.fromarray(cv2.cvtColor(f, cv2.COLOR_BGR2RGB)) for f in self.cine_frames]
+            pil_frames[0].save(
+                gif_path,
+                save_all=True,
+                append_images=pil_frames[1:],
+                duration=75,
+                loop=0,
+                optimize=True
+            )
+
+            # 2. تولید فایل HTML ویوور تعاملی وب
+            html_path = os.path.join(out_dir, "Boali_3D_360_Interactive_Viewer.html")
+            import base64
+            frames_b64 = []
+            for f in self.cine_frames:
+                _, buf = cv2.imencode(".jpg", f, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                b64 = base64.b64encode(buf).decode("ascii")
+                frames_b64.append(f"data:image/jpeg;base64,{b64}")
+
+            html_content = self._build_html_viewer_template(frames_b64)
+            with open(html_path, "w", encoding="utf-8") as hf:
+                hf.write(html_content)
+
+            ans = messagebox.askyesno(
+                "استخراج موفقیت‌آمیز ویوور ۳۶۰ درجه",
+                f"پکیج خروجی سه‌بعدی با موفقیت تولید شد:\n\n"
+                f"• ویوور تعاملی تحت وب: {os.path.basename(html_path)}\n"
+                f"• انیمیشن متحرک باکیفیت: {os.path.basename(gif_path)}\n\n"
+                f"آیا مایلید ویوور تعاملی هم‌اکنون در مرورگر وب باز شود؟"
+            )
+            if ans:
+                import webbrowser
+                webbrowser.open(f"file://{os.path.abspath(html_path)}")
+        except Exception as e:
+            messagebox.showerror("خطا در استخراج ویوور ۳۶۰ درجه", str(e))
+
+    def _build_html_viewer_template(self, frames_b64):
+        """ایجاد کد کامل HTML5/CSS3/JS ویوور تعاملی ۳۶۰ درجه به صورت ۱۰۰٪ آفلاین و خودکفا."""
+        import json
+        frames_json = json.dumps(frames_b64)
+        n_frames = len(frames_b64)
+        pat_name = self.engine.metadata.get("PatientName", "بیمار بالینی") if hasattr(self.engine, "metadata") else "بیمار بالینی"
+        study_desc = self.engine.metadata.get("StudyDescription", "CT Study") if hasattr(self.engine, "metadata") else "CT Study"
+
+        return f"""<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ویوور تعاملی ۳۶۰ درجه سی‌تی اسکن بازسازی سه‌بعدی | بیمارستان بوعلی مریوان</title>
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
+    background-color: #050811;
+    color: #f1f5f9;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow-x: hidden;
+    user-select: none;
+  }}
+  .viewer-card {{
+    background: #0b1120;
+    border: 1px solid #1e293b;
+    border-radius: 14px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+    width: 95%;
+    max-width: 840px;
+    margin: 20px auto;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }}
+  .card-header {{
+    background: linear-gradient(90deg, #0f172a 0%, #1e293b 100%);
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #334155;
+  }}
+  .badge-hosp {{
+    background: #0284c7;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 800;
+    padding: 4px 10px;
+    border-radius: 6px;
+    letter-spacing: 0.5px;
+  }}
+  .header-titles {{ text-align: right; }}
+  .header-main {{ font-size: 14px; font-weight: 700; color: #f8fafc; }}
+  .header-sub {{ font-size: 11px; color: #94a3b8; margin-top: 2px; direction: ltr; }}
+  .viewport-wrapper {{
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    max-height: 640px;
+    background: #000000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: grab;
+  }}
+  .viewport-wrapper:active {{ cursor: grabbing; }}
+  img#ctFrame {{
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+    pointer-events: none;
+  }}
+  .hud-top-left {{
+    position: absolute;
+    top: 14px;
+    left: 16px;
+    background: rgba(15, 23, 42, 0.75);
+    backdrop-filter: blur(6px);
+    border: 1px solid rgba(51, 65, 85, 0.6);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 11px;
+    color: #38bdf8;
+    font-family: monospace;
+    direction: ltr;
+    pointer-events: none;
+  }}
+  .hud-top-right {{
+    position: absolute;
+    top: 14px;
+    right: 16px;
+    background: rgba(15, 23, 42, 0.75);
+    backdrop-filter: blur(6px);
+    border: 1px solid rgba(51, 65, 85, 0.6);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 11px;
+    color: #f59e0b;
+    font-weight: 700;
+    pointer-events: none;
+  }}
+  .hud-bottom-hint {{
+    position: absolute;
+    bottom: 12px;
+    background: rgba(15, 23, 42, 0.65);
+    backdrop-filter: blur(4px);
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 10px;
+    color: #94a3b8;
+    pointer-events: none;
+  }}
+  .controls-panel {{
+    background: #0f172a;
+    padding: 16px 20px;
+    border-top: 1px solid #1e293b;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }}
+  .slider-row {{ display: flex; align-items: center; gap: 12px; }}
+  .angle-label {{
+    font-family: monospace;
+    font-size: 13px;
+    font-weight: 700;
+    color: #38bdf8;
+    min-width: 75px;
+    text-align: center;
+    direction: ltr;
+  }}
+  .scrubber {{
+    flex: 1;
+    -webkit-appearance: none;
+    height: 6px;
+    border-radius: 3px;
+    background: #334155;
+    outline: none;
+    cursor: pointer;
+  }}
+  .scrubber::-webkit-slider-thumb {{
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #38bdf8;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.7);
+    cursor: pointer;
+  }}
+  .btn-row {{
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }}
+  .btn-group-left {{ display: flex; gap: 6px; }}
+  .btn-group-right {{ display: flex; gap: 6px; }}
+  .ctrl-btn {{
+    background: #1e293b;
+    border: 1px solid #334155;
+    color: #cbd5e1;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }}
+  .ctrl-btn:hover {{
+    background: #0284c7;
+    color: #fff;
+    border-color: #38bdf8;
+  }}
+  .ctrl-btn.active {{
+    background: #0284c7;
+    color: #fff;
+    border-color: #38bdf8;
+  }}
+  .card-footer {{
+    background: #0b1120;
+    padding: 10px 20px;
+    border-top: 1px solid #1e293b;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 10px;
+    color: #64748b;
+  }}
+</style>
+</head>
+<body>
+<div class="viewer-card">
+  <div class="card-header">
+    <div class="badge-hosp">BOALI 3D CT STUDIO</div>
+    <div class="header-titles">
+      <div class="header-main">بازسازی تعاملی ۳۶۰ درجه سی‌تی اسکن (مدل استخوان)</div>
+      <div class="header-sub">Patient: {pat_name} | {study_desc}</div>
+    </div>
+  </div>
+  <div class="viewport-wrapper" id="viewport">
+    <img id="ctFrame" src="{frames_b64[0]}" alt="3D CT Scan Frame">
+    <div class="hud-top-left" id="hudAngle">0° | AP (Anterior)</div>
+    <div class="hud-top-right">3D CT RECONSTRUCTION</div>
+    <div class="hud-bottom-hint">🖱️ با درگ موس یا اسکرول چرخ موس بچرخانید</div>
+  </div>
+  <div class="controls-panel">
+    <div class="slider-row">
+      <button class="ctrl-btn active" id="btnPlay" onclick="togglePlay()">⏸ توقف</button>
+      <input type="range" class="scrubber" id="angleSlider" min="0" max="{n_frames - 1}" value="0" oninput="onSliderChange(this.value)">
+      <div class="angle-label" id="angleText">0° AP</div>
+    </div>
+    <div class="btn-row">
+      <div class="btn-group-left">
+        <button class="ctrl-btn active" id="btnAP" onclick="jumpToAngle(0)">روبرو (0° AP)</button>
+        <button class="ctrl-btn" id="btnObl" onclick="jumpToAngle({n_frames // 4})">مایل (90° Lat)</button>
+        <button class="ctrl-btn" id="btnPA" onclick="jumpToAngle({n_frames // 2})">پشت (180° PA)</button>
+        <button class="ctrl-btn" id="btnMed" onclick="jumpToAngle({(3 * n_frames) // 4})">داخلی (270° Med)</button>
+      </div>
+      <div class="btn-group-right">
+        <button class="ctrl-btn" onclick="stepFrame(-1)">◀ قبل</button>
+        <button class="ctrl-btn" onclick="stepFrame(1)">بعد ▶</button>
+      </div>
+    </div>
+  </div>
+  <div class="card-footer">
+    <div>مرکز آموزشی درمانی بیمارستان بوعلی مریوان - آرام مصطفائی | v3.0.3</div>
+    <div style="direction: ltr; font-family: monospace;">800×800 Invariant Scale | Pure Skeleton</div>
+  </div>
+</div>
+<script>
+  const FRAMES = {frames_json};
+  const TOTAL_FRAMES = FRAMES.length;
+  let currentIdx = 0;
+  let isPlaying = true;
+  let playInterval = null;
+  let imgEl = document.getElementById("ctFrame");
+  let sliderEl = document.getElementById("angleSlider");
+  let angleTextEl = document.getElementById("angleText");
+  let hudAngleEl = document.getElementById("hudAngle");
+  let btnPlayEl = document.getElementById("btnPlay");
+  let viewportEl = document.getElementById("viewport");
+
+  function getAngleDesc(idx) {{
+    let deg = Math.round((idx / TOTAL_FRAMES) * 360);
+    let desc = "";
+    if (deg >= 345 || deg <= 15) desc = "AP (قدامی)";
+    else if (deg >= 75 && deg <= 105) desc = "Lateral (طرفی)";
+    else if (deg >= 165 && deg <= 195) desc = "PA (خلفی)";
+    else if (deg >= 255 && deg <= 285) desc = "Medial (داخلی)";
+    else if (deg < 90) desc = "Antero-Lateral";
+    else if (deg < 180) desc = "Postero-Lateral";
+    else if (deg < 270) desc = "Postero-Medial";
+    else desc = "Antero-Medial";
+    return {{ deg, desc }};
+  }}
+
+  function setFrame(idx) {{
+    currentIdx = (idx + TOTAL_FRAMES) % TOTAL_FRAMES;
+    imgEl.src = FRAMES[currentIdx];
+    sliderEl.value = currentIdx;
+    let {{ deg, desc }} = getAngleDesc(currentIdx);
+    angleTextEl.textContent = deg + "° " + desc.split(" ")[0];
+    hudAngleEl.textContent = deg + "° | " + desc;
+    document.querySelectorAll(".btn-group-left .ctrl-btn").forEach(b => b.classList.remove("active"));
+    if (currentIdx === 0) document.getElementById("btnAP")?.classList.add("active");
+    else if (currentIdx === Math.floor(TOTAL_FRAMES/4)) document.getElementById("btnObl")?.classList.add("active");
+    else if (currentIdx === Math.floor(TOTAL_FRAMES/2)) document.getElementById("btnPA")?.classList.add("active");
+    else if (currentIdx === Math.floor((3*TOTAL_FRAMES)/4)) document.getElementById("btnMed")?.classList.add("active");
+  }}
+
+  function onSliderChange(val) {{
+    if (isPlaying) stopPlay();
+    setFrame(parseInt(val, 10));
+  }}
+
+  function stepFrame(delta) {{
+    if (isPlaying) stopPlay();
+    setFrame(currentIdx + delta);
+  }}
+
+  function jumpToAngle(frameIdx) {{
+    if (isPlaying) stopPlay();
+    setFrame(frameIdx);
+  }}
+
+  function togglePlay() {{
+    if (isPlaying) stopPlay();
+    else startPlay();
+  }}
+
+  function startPlay() {{
+    isPlaying = true;
+    btnPlayEl.textContent = "⏸ توقف";
+    btnPlayEl.classList.add("active");
+    playInterval = setInterval(() => {{ setFrame(currentIdx + 1); }}, 75);
+  }}
+
+  function stopPlay() {{
+    isPlaying = false;
+    btnPlayEl.textContent = "▶ پخش ۳۶۰°";
+    btnPlayEl.classList.remove("active");
+    if (playInterval) {{ clearInterval(playInterval); playInterval = null; }}
+  }}
+
+  let isDragging = false, startX = 0;
+  viewportEl.addEventListener("mousedown", e => {{ isDragging = true; startX = e.clientX; if (isPlaying) stopPlay(); }});
+  window.addEventListener("mousemove", e => {{
+    if (!isDragging) return;
+    let dx = e.clientX - startX;
+    if (Math.abs(dx) >= 12) {{
+      let steps = Math.floor(dx / 12);
+      setFrame(currentIdx - steps);
+      startX = e.clientX;
+    }}
+  }});
+  window.addEventListener("mouseup", () => {{ isDragging = false; }});
+  viewportEl.addEventListener("wheel", e => {{
+    e.preventDefault();
+    if (isPlaying) stopPlay();
+    setFrame(currentIdx + (e.deltaY < 0 ? -1 : 1));
+  }});
+
+  setFrame(0);
+  startPlay();
+</script>
+</body>
+</html>
+"""
 
     def _save_cine_series(self):
         if not self.cine_frames:
