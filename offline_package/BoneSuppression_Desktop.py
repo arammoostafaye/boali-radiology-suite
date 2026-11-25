@@ -13,7 +13,7 @@ if getattr(sys, 'frozen', False) and not os.environ.get("_BOALI_RUNNING_EXTERNAL
             # Check if external script is modified/updated
             with open(ext_script, "r", encoding="utf-8") as _f_chk:
                 _head = _f_chk.read(5000)
-                if 'APP_VERSION = "3.6.2"' in _head or 'APP_VERSION = "3.6.2"' in _head or 'AI ENGINES' in _head or 'boali_splash_video' in _head:
+                if 'APP_VERSION = "3.6.3"' in _head or 'APP_VERSION = "3.6.3"' in _head or 'AI ENGINES' in _head or 'boali_splash_video' in _head:
                     os.environ["_BOALI_RUNNING_EXTERNAL"] = "1"
                     import importlib.util
                     spec = importlib.util.spec_from_file_location("__main__", ext_script)
@@ -243,11 +243,11 @@ if os.path.exists(_v_file_candidate):
             if _file_ver:
                 APP_VERSION = _file_ver
             else:
-                APP_VERSION = "3.6.2"
+                APP_VERSION = "3.6.3"
     except Exception:
-        APP_VERSION = "3.6.2"
+        APP_VERSION = "3.6.3"
 else:
-    APP_VERSION = "3.6.2"
+    APP_VERSION = "3.6.3"
 APP_NAME_BASE = "نرم افزار تخصصی واحد تصویر برداری بیمارستان بوعلی - آرام مصطفائی"
 APP_TITLE = f"{APP_NAME_BASE} (نگارش v{APP_VERSION})"
 DEVELOPER_ROLE = "پرسنل واحد امور تصویربرداری بیمارستان بوعلی"
@@ -706,17 +706,42 @@ class ClinicalReportModal(tk.Toplevel):
                 ]
 
             montage_path = None
-            if hasattr(self.app, "mammo_4view_summary") and self.app.mammo_4view_summary is not None:
-                montage_path = os.path.join(EXE_DIR, "temp_mammo_pdf_fig.jpg")
-                cv2.imwrite(montage_path, self.app.mammo_4view_summary)
-            elif hasattr(self.app, "last_3d_snapshot") and self.app.last_3d_snapshot is not None:
+            # Check if mammography 4-views are present to build a 2x2 collage
+            mammo_views = getattr(self.app, "mammo_views", {})
+            has_mammo_img = any(v is not None and v.get("arr") is not None for v in mammo_views.values())
+
+            if has_mammo_img:
+                try:
+                    montage_path = os.path.join(EXE_DIR, "temp_mammo_pdf_fig.jpg")
+                    cells = []
+                    for s in ["R-CC", "L-CC", "R-MLO", "L-MLO"]:
+                        v = mammo_views.get(s)
+                        if v is not None and v.get("arr") is not None:
+                            img_norm = np.clip(v["arr"], 0.0, 1.0)
+                            u8_c = (img_norm * 255.0).astype(np.uint8)
+                            u8_c = cv2.resize(u8_c, (512, 512), interpolation=cv2.INTER_AREA)
+                        else:
+                            u8_c = np.zeros((512, 512), dtype=np.uint8)
+                        # Add text label
+                        cv2.putText(u8_c, s, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, 255, 2)
+                        cells.append(u8_c)
+                    row1 = np.hstack([cells[0], cells[1]])
+                    row2 = np.hstack([cells[2], cells[3]])
+                    mammo_quad_grid = np.vstack([row1, row2])
+                    cv2.imwrite(montage_path, mammo_quad_grid)
+                except Exception as _e_m:
+                    print(f"Error building mammo montage: {_e_m}")
+
+            elif hasattr(self.app, "last_3d_snapshot") and isinstance(self.app.last_3d_snapshot, np.ndarray):
                 montage_path = os.path.join(EXE_DIR, "temp_3d_pdf_fig.jpg")
                 cv2.imwrite(montage_path, self.app.last_3d_snapshot)
+
             elif getattr(self.app, "original_np", None) is not None:
                 montage_path = os.path.join(EXE_DIR, "temp_diag_pdf_fig.jpg")
                 arr_norm = np.clip(self.app.original_np, 0.0, 1.0)
                 u8_img = (arr_norm * 255.0).astype(np.uint8)
                 cv2.imwrite(montage_path, u8_img)
+
             elif getattr(self.app, "ct_slices", None) and len(self.app.ct_slices) > 0:
                 montage_path = os.path.join(EXE_DIR, "temp_diag_pdf_fig.jpg")
                 mid_s = self.app.ct_slices[len(self.app.ct_slices) // 2]
@@ -4134,9 +4159,18 @@ class BoneSuppressionApp(tk.Tk):
                         arr = np.clip(arr, lo, hi)
                         arr = (arr - lo) / (hi - lo + 1e-8)
                     else:
-                        if getattr(ds, "PhotometricInterpretation", "") == "MONOCHROME1":
+                        photo = str(getattr(ds, "PhotometricInterpretation", "")).strip().upper()
+                        if photo == "MONOCHROME1":
                             arr = arr.max() - arr
+                        # If modality is MG (Mammography) or view is CC/MLO, ensure air background is black!
+                        modality = meta.get("modality", "")
                         arr = (arr - arr.min()) / (arr.max() - arr.min() + 1e-8)
+                        if modality == "MG" or "CC" in meta.get("view_position", "") or "MLO" in meta.get("view_position", ""):
+                            # Mammography background is air -> must be dark (near 0)
+                            # Check corner pixel values
+                            corners = [arr[0,0], arr[0,-1], arr[-1,0], arr[-1,-1]]
+                            if np.mean(corners) > 0.5:
+                                arr = 1.0 - arr
                     return arr, meta
             except Exception:
                 pass
@@ -4182,6 +4216,9 @@ class BoneSuppressionApp(tk.Tk):
                 self.patient_info["date"] = f"{d[:4]}/{d[4:6]}/{d[6:]}"
 
     def looks_inverted(self, arr):
+        # Mammography and CT should NEVER be auto-inverted based on border heuristic!
+        if getattr(self, "active_ai_module", None) and self.active_ai_module.get() in ("mammo", "ct3d"):
+            return False
         h, w = arr.shape
         margin = max(4, int(min(h, w) * 0.05))
         border = np.concatenate([
