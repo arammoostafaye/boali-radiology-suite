@@ -2589,14 +2589,14 @@ class BoaliAutoUpdater:
             # Write version.txt immediately to prevent any looping
             try:
                 with open(os.path.join(exe_dir, "version.txt"), "w", encoding="utf-8") as vf:
-                    vf.write("3.0.3\n")
+                    vf.write(f"{new_version.lstrip('v')}\n")
             except Exception:
                 pass
 
             # Restart app
             messagebox.showinfo(
                 "به‌روزرسانی موفق",
-                "پچ نگارش ۳.۰.۳ با موفقیت روی سیستم شما اعمال شد.\nجهت بارگذاری کامل، نرم‌افزار را مجدداً باز فرمایید."
+                "پچ نگارش جدید با موفقیت روی سیستم شما اعمال شد.\nجهت بارگذاری کامل، نرم‌افزار را مجدداً باز فرمایید."
             )
             dlg.destroy()
             if self.root_app:
@@ -2767,78 +2767,72 @@ class BoneSuppressionApp(tk.Tk):
     # Splash Screen
     # -------------------------------------------------------------------------
     def init_splash_ui(self):
-        self.splash_frame = tk.Frame(self.splash_container, bg=C_CANVAS)
-        self.splash_frame.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+        self.splash_container.config(bg="#020610")
+        self.splash_video_path = os.path.join(EXE_DIR, "boali_splash_video.mp4")
+        if not os.path.isfile(self.splash_video_path):
+            alt = os.path.join(BUNDLE_DIR, "boali_splash_video.mp4")
+            if os.path.isfile(alt):
+                self.splash_video_path = alt
 
-        tk.Label(self.splash_frame, text="🫁", font=("Segoe UI", 48), bg=C_CANVAS).pack(pady=(0, 6))
+        self.splash_canvas = tk.Canvas(self.splash_container, bg="#020610", highlightthickness=0, bd=0)
+        self.splash_canvas.pack(fill=tk.BOTH, expand=True)
 
-        tk.Label(self.splash_frame, text="BoneSuppression AI Workstation",
-                 font=("Segoe UI", 20, "bold"), fg=C_CYAN, bg=C_CANVAS).pack()
-        tk.Label(self.splash_frame, text="سامانه جامع هوش مصنوعی تصویربرداری قفسه سینه",
-                 font=("Segoe UI", 11), fg=C_TEXT_LIGHT, bg=C_CANVAS).pack(pady=(2, 16))
+        self.btn_skip_splash = tk.Button(
+            self.splash_container, text="ورود مستقیم (Skip) ➔", font=("Vazirmatn", 9, "bold"),
+            bg="#0e1e36", fg="#38bdf8", activebackground="#00e5ff", activeforeground="#000000",
+            relief=tk.FLAT, bd=1, highlightbackground="#00e5ff", highlightthickness=1,
+            padx=14, pady=5, cursor="hand2", command=self.end_splash
+        )
+        self.btn_skip_splash.place(relx=0.91, rely=0.93, anchor=tk.CENTER)
 
-        # Hierarchical Tree Box
-        self.tree_box = tk.Frame(self.splash_frame, bg=C_CARD, bd=1, relief=tk.SOLID,
-                                 highlightbackground=C_BORDER, highlightthickness=1, padx=24, pady=16)
-        self.tree_box.pack(pady=10)
-
-        self.tree_nodes = [
-            ("🏛️  شبکه بهداشت و درمان مریوان", "#38bdf8", ("Segoe UI", 11, "bold")),
-            ("└── 🏥  بیمارستان بوعلی", "#818cf8", ("Segoe UI", 10, "bold")),
-            ("    └── 🩻  واحد امور تصویربرداری", "#34d399", ("Segoe UI", 10, "bold")),
-            ("        └── 👨‍💻  توسعه و آماده‌سازی: آرام مصطفائی", "#fcd34d", ("Segoe UI", 9, "bold")),
-        ]
-        self.tree_labels = []
-        for text, color, font in self.tree_nodes:
-            lbl = tk.Label(self.tree_box, text="", font=font, fg=color, bg=C_CARD, anchor=tk.W)
-            lbl.pack(fill=tk.X, pady=3)
-            self.tree_labels.append((lbl, text))
-
-        self.splash_status = tk.Label(self.splash_frame, text="در حال آماده‌سازی ماژول‌های هوش مصنوعی...",
-                                      font=("Segoe UI", 9), fg=C_TEXT_MUTED, bg=C_CANVAS)
-        self.splash_status.pack(pady=(12, 6))
-
-        self.splash_progress = ttk.Progressbar(self.splash_frame, mode="indeterminate", length=360)
-        self.splash_progress.pack(pady=4)
-
-        btn_skip = create_modern_button(self.splash_frame, "ورود مستقیم ➔", self.end_splash,
-                                        bg=C_SLATE, hover_bg=C_BLUE, font=("Segoe UI", 9), padx=16, pady=4)
-        btn_skip.pack(pady=(14, 0))
+        self.video_cap = None
+        self.splash_photo = None
 
     def show_splash(self):
         self.splash_active = True
         self.splash_container.pack(fill=tk.BOTH, expand=True)
-        try:
-            self.splash_progress.start(10)
-        except Exception:
-            pass
-        self.after(100, lambda: self.splash_step(0))
+        if os.path.isfile(self.splash_video_path):
+            try:
+                self.video_cap = cv2.VideoCapture(self.splash_video_path)
+            except Exception as e:
+                print(f"Failed to open splash video: {e}")
+                self.video_cap = None
+        self.after(20, self._play_splash_frame)
 
-    def splash_step(self, step):
+    def _play_splash_frame(self):
         if not getattr(self, "splash_active", False):
             return
-        if step < len(self.tree_labels):
-            lbl, full_text = self.tree_labels[step]
-            lbl.config(text=full_text)
-            msgs = [
-                "اتصال به شبکه بهداشت و درمان مریوان...",
-                "بارگذاری سرویس‌های بیمارستان بوعلی...",
-                "آماده‌سازی ماژول‌های رادیولوژی و پردازش تصویر...",
-                "تأیید هویت کاربری و بارگذاری ورک‌استیشن..."
-            ]
-            if step < len(msgs):
-                self.splash_status.config(text=msgs[step])
-            self.after(550, lambda: self.splash_step(step + 1))
-        else:
-            self.splash_status.config(text="✓ سامانه آماده به کار است. ورود به برنامه...")
-            self.after(700, self.end_splash)
+        if self.video_cap is not None and self.video_cap.isOpened():
+            ret, frame = self.video_cap.read()
+            if ret:
+                cw = self.splash_canvas.winfo_width()
+                ch = self.splash_canvas.winfo_height()
+                if cw < 50 or ch < 50:
+                    cw, ch = 960, 540
+                fh, fw = frame.shape[:2]
+                scale = min(cw / float(fw), ch / float(fh))
+                nw, nh = max(10, int(fw * scale)), max(10, int(fh * scale))
+                resized = cv2.resize(frame, (nw, nh), interpolation=cv2.INTER_LINEAR)
+                rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+                pil_im = Image.fromarray(rgb)
+                self.splash_photo = ImageTk.PhotoImage(pil_im)
+                self.splash_canvas.delete("all")
+                self.splash_canvas.create_image(cw // 2, ch // 2, anchor=tk.CENTER, image=self.splash_photo)
+                self.after(33, self._play_splash_frame)
+                return
+            else:
+                self.after(300, self.end_splash)
+                return
+        self.after(600, self.end_splash)
 
     def end_splash(self):
         self.splash_active = False
-        try:
-            self.splash_progress.stop()
-        except Exception:
-            pass
+        if self.video_cap is not None:
+            try:
+                self.video_cap.release()
+            except Exception:
+                pass
+            self.video_cap = None
         self.splash_container.pack_forget()
         self.show_login_view()
 
@@ -3895,7 +3889,7 @@ class BoneSuppressionApp(tk.Tk):
     def _start_auto_update_bg(self):
         """بررسی نامحسوس پس‌زمینه در هنگام شروع به کار نرم‌افزار"""
         if start_background_update_check:
-            start_background_update_check(self, current_version=APP_VERSION, delay_sec=4)
+            start_background_update_check(self, current_version=APP_VERSION, delay_sec=12)
 
     def open_about(self):
         ModernAboutDialog(self)
