@@ -201,11 +201,11 @@ if os.path.exists(_v_file_candidate):
             if _file_ver:
                 APP_VERSION = _file_ver
             else:
-                APP_VERSION = "3.3.0"
+                APP_VERSION = "3.4.0"
     except Exception:
-        APP_VERSION = "3.3.0"
+        APP_VERSION = "3.4.0"
 else:
-    APP_VERSION = "3.3.0"
+    APP_VERSION = "3.4.0"
 APP_NAME_BASE = "نرم افزار تخصصی واحد تصویر برداری بیمارستان بوعلی - آرام مصطفائی"
 APP_TITLE = f"{APP_NAME_BASE} (نگارش v{APP_VERSION})"
 DEVELOPER_ROLE = "پرسنل واحد امور تصویربرداری بیمارستان بوعلی"
@@ -3087,65 +3087,130 @@ class BoneSuppressionApp(tk.Tk):
         self.status_label.pack(side=tk.RIGHT, padx=12, pady=6)
 
     def init_sidebar_content(self):
-        # 1. Header of Sidebar - Sleek Dark Medical Style
-        sb_head = tk.Frame(self.sidebar_frame, bg=C_HEADER, height=52, bd=1, relief=tk.SOLID,
-                           highlightbackground=C_BORDER, highlightthickness=1)
+        # 1. Header of Sidebar - Cyber-Radiology 2026 Style
+        sb_head = tk.Frame(self.sidebar_frame, bg="#08101e", height=52, bd=1, relief=tk.SOLID,
+                           highlightbackground="#162e4a", highlightthickness=1)
         sb_head.pack(fill=tk.X)
 
-        h_content = tk.Frame(sb_head, bg=C_HEADER)
+        h_content = tk.Frame(sb_head, bg="#08101e")
         h_content.pack(fill=tk.X, padx=12, pady=6)
 
-        tk.Label(h_content, text="🩺 جعبه‌ابزار هوش مصنوعی رادیولوژی", font=("Segoe UI", 10, "bold"),
-                 fg=C_CYAN, bg=C_HEADER).pack(anchor=tk.E)
-        tk.Label(h_content, text="واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی", font=("Segoe UI", 8),
-                 fg=C_TEXT_MUTED, bg=C_HEADER).pack(anchor=tk.E)
+        tk.Label(h_content, text=fa("🩺 جعبه‌ابزار هوش مصنوعی رادیولوژی"), font=("Vazirmatn", 10, "bold"),
+                 fg="#00e5ff", bg="#08101e").pack(anchor=tk.E)
+        tk.Label(h_content, text=fa("واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی"), font=("Vazirmatn", 8),
+                 fg="#94a3b8", bg="#08101e").pack(anchor=tk.E)
 
-        # 2. Apple iOS 2026 Segmented AI Modules (Vertical Floating Frosted Cards)
-        selector_frame = tk.Frame(self.sidebar_frame, bg="#0d1322", pady=4, padx=6)
-        selector_frame.pack(fill=tk.X, padx=10, pady=(6, 2))
+        # 2. Cyber-Holographic Medical HUD Modules (Real Integrated Cards)
+        selector_frame = tk.Frame(self.sidebar_frame, bg="#050a17", pady=4, padx=4)
+        selector_frame.pack(fill=tk.X, padx=6, pady=(4, 2))
 
-        # Top pill switch header: AI Modules | Tools | Report
-        pill_nav = tk.Frame(selector_frame, bg="#070b13", bd=1, relief=tk.SOLID,
-                            highlightbackground="#1e293b", highlightthickness=1)
-        pill_nav.pack(fill=tk.X, pady=(2, 8))
+        # Cyber Navigation Pill Header (Interactive Tab Switcher)
+        self.sidebar_active_tab = tk.StringVar(value="engines")
+        pill_nav = tk.Frame(selector_frame, bg="#02040a", bd=1, relief=tk.SOLID,
+                            highlightbackground="#162e4a", highlightthickness=1)
+        pill_nav.pack(fill=tk.X, pady=(2, 6))
 
-        tk.Label(pill_nav, text="AI Modules", font=("Segoe UI", 8, "bold"), fg="#ffffff", bg="#0284c7", padx=14, pady=3).pack(side=tk.LEFT, padx=2, pady=2)
-        tk.Label(pill_nav, text="Tools", font=("Segoe UI", 8), fg="#94a3b8", bg="#070b13", padx=10, pady=3).pack(side=tk.LEFT, padx=2, pady=2)
-        tk.Label(pill_nav, text="Auto Report", font=("Segoe UI", 8), fg="#94a3b8", bg="#070b13", padx=10, pady=3).pack(side=tk.LEFT, padx=2, pady=2)
+        self.btn_tab_engines = tk.Button(
+            pill_nav, text="AI ENGINES", font=("Segoe UI", 8, "bold"),
+            fg="#ffffff", bg="#0284c7", activebackground="#00e5ff", activeforeground="#000000",
+            relief=tk.FLAT, bd=0, padx=10, pady=2, cursor="hand2",
+            command=lambda: self.switch_sidebar_tab("engines")
+        )
+        self.btn_tab_engines.pack(side=tk.LEFT, padx=2, pady=2)
 
-        cards_list = tk.Frame(selector_frame, bg="#0d1322")
-        cards_list.pack(fill=tk.X)
+        self.btn_tab_tools = tk.Button(
+            pill_nav, text="ACTIVE TOOLS & PARAMS", font=("Segoe UI", 8, "bold"),
+            fg="#94a3b8", bg="#02040a", activebackground="#00e5ff", activeforeground="#000000",
+            relief=tk.FLAT, bd=0, padx=10, pady=2, cursor="hand2",
+            command=lambda: self.switch_sidebar_tab("tools")
+        )
+        self.btn_tab_tools.pack(side=tk.LEFT, padx=2, pady=2)
+
+        self.btn_tab_rep = tk.Button(
+            pill_nav, text="REPORT", font=("Segoe UI", 8),
+            fg="#94a3b8", bg="#02040a", activebackground="#00e5ff", activeforeground="#000000",
+            relief=tk.FLAT, bd=0, padx=8, pady=2, cursor="hand2",
+            command=self.open_report_dialog
+        )
+        self.btn_tab_rep.pack(side=tk.LEFT, padx=2, pady=2)
+
+        self.cards_list = tk.Frame(selector_frame, bg="#050a17")
+        self.cards_list.pack(fill=tk.X)
+        cards_list = self.cards_list
 
         self.mod_btns = {}
-        # Apple iOS 2026 Module Definitions (Icon, Title, Subtitle, Accent Color)
+        self.hud_tk_icons = []
+        icons_dir = os.path.join(EXE_DIR, "icons_cyber_hud")
+
         modules_cfg = [
-            ("suppress", "🫁 Bone Suppression", "AI-powered soft tissue reconstruction", "#0284c7"),
-            ("fracture", "🦴 Fracture Detection", "Detect and classify bone fractures with AI", "#0d9488"),
-            ("mammo", "🩺 Mammography AI", "CADe/CADx 4-view screening assistant", "#be185d"),
-            ("ct3d", "🧊 3D CT Reconstruction", "Volumetric Cinematic 3D Studio & Cine", "#6366f1"),
-            ("pathology", "🔬 18 Pathologies & CTR", "Deep thoracic screening & cardiothoracic ratio", "#7c3aed"),
+            ("suppress", "card_cyber_bone_suppression.png", "CXR BONE SUPPRESSION", fa("حذف استخوان قفسه سینه و تفکیک بافت نرم ریه (Qure.ai)")),
+            ("fracture", "card_cyber_fracture.png", "FRACTURE DYNAMIC ANALYSIS", fa("کشف هوشمند خطوط شکستگی و تروما (YOLOv8)")),
+            ("pathology", "card_cyber_lungs.png", "PULMONARY AI SEGMENTATION", fa("غربالگری ۱۸ بیماری و شاخص قلبی-توراسیک")),
+            ("mammo", "card_cyber_mammo.png", "CYBER-MAMMOGRAPHY VISUALIZER", fa("آنالیز ۴ نمایه و خط‌کش کالیپر (BI-RADS)")),
+            ("ct3d", "card_cyber_3d_ct.png", "ANATOMICAL 3D RECONSTRUCTION", fa("استودیوی بازسازی سه‌بعدی سینماتیک ۳۶۰ درجه")),
+            ("report", "card_cyber_report.png", "HOLOGRAPHIC DIAGNOSTIC ARCHIVE", fa("صدور خودکار گزارش رسمی بالینی دوزبانه بیمارستان")),
         ]
 
-        for mod_id, mod_label, mod_sub, acc_color in modules_cfg:
-            card_btn = tk.Button(
-                cards_list,
-                text=f"{mod_label}  •  {mod_sub}",
-                font=("Segoe UI", 8, "bold" if mod_id == "suppress" else "normal"),
-                justify=tk.LEFT,
-                anchor="w",
-                bg=acc_color if mod_id == "suppress" else "#141c2e",
-                fg="#ffffff" if mod_id == "suppress" else "#cbd5e1",
-                activebackground=acc_color,
-                activeforeground="#ffffff",
+        for mod_id, icon_file, title_txt, sub_txt in modules_cfg:
+            is_active = (mod_id == self.active_ai_module.get())
+            card_bg = "#0c1b2f" if is_active else "#060d19"
+            border_c = "#00e5ff" if is_active else "#162e4a"
+
+            c_frame = tk.Frame(cards_list, bg=card_bg, bd=1, relief=tk.SOLID,
+                               highlightbackground=border_c, highlightthickness=1, padx=4, pady=4)
+            c_frame.pack(fill=tk.X, pady=3)
+
+            row_box = tk.Frame(c_frame, bg=card_bg)
+            row_box.pack(fill=tk.X)
+
+            icon_p = os.path.join(icons_dir, icon_file)
+            if not os.path.isfile(icon_p):
+                icon_p = os.path.join(BUNDLE_DIR, "icons_cyber_hud", icon_file)
+
+            if os.path.isfile(icon_p):
+                try:
+                    pil_i = Image.open(icon_p).convert("RGBA").resize((60, 48), Image.Resampling.LANCZOS)
+                    tk_i = ImageTk.PhotoImage(pil_i)
+                    self.hud_tk_icons.append(tk_i)
+                    lbl_img = tk.Label(row_box, image=tk_i, bg=card_bg)
+                    lbl_img.pack(side=tk.LEFT, padx=(0, 6))
+                except Exception:
+                    lbl_img = tk.Label(row_box, text="⚡", font=("Segoe UI", 12), fg="#00e5ff", bg=card_bg)
+                    lbl_img.pack(side=tk.LEFT, padx=(0, 6))
+            else:
+                lbl_img = tk.Label(row_box, text="⚡", font=("Segoe UI", 12), fg="#00e5ff", bg=card_bg)
+                lbl_img.pack(side=tk.LEFT, padx=(0, 6))
+
+            t_box = tk.Frame(row_box, bg=card_bg)
+            t_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+            lbl_t = tk.Label(t_box, text=title_txt, font=("Segoe UI", 8, "bold"), fg="#ffffff", bg=card_bg)
+            lbl_t.pack(anchor="w", pady=(1, 0))
+
+            lbl_s = tk.Label(t_box, text=sub_txt, font=("Vazirmatn", 7), fg="#38bdf8", bg=card_bg)
+            lbl_s.pack(anchor="w")
+
+            btn_sel = tk.Button(
+                t_box,
+                text="ACTIVE MODULE ✓" if is_active else "SELECT MODULE ➔",
+                font=("Segoe UI", 7, "bold"),
+                bg="#0284c7" if is_active else "#0e1e33",
+                fg="#ffffff" if is_active else "#94a3b8",
+                activebackground="#00e5ff",
+                activeforeground="#000000",
                 relief=tk.FLAT,
-                bd=1,
-                padx=12,
-                pady=6,
+                bd=0,
+                padx=8,
+                pady=1,
                 cursor="hand2",
                 command=lambda m=mod_id: self.select_ai_module(m)
             )
-            card_btn.pack(fill=tk.X, pady=2)
-            self.mod_btns[mod_id] = card_btn
+            btn_sel.pack(anchor="w", pady=(2, 0))
+
+            self.mod_btns[mod_id] = (c_frame, row_box, t_box, lbl_t, lbl_s, btn_sel)
+
+            for w in [c_frame, row_box, t_box, lbl_t, lbl_s, lbl_img]:
+                w.bind("<Button-1>", lambda e, m_id=mod_id: self.select_ai_module(m_id))
 
         # Divider line
         tk.Frame(self.sidebar_frame, bg=C_BORDER, height=1).pack(fill=tk.X, padx=10, pady=4)
@@ -3176,7 +3241,8 @@ class BoneSuppressionApp(tk.Tk):
                        activebackground="#0d1424", activeforeground=C_CYAN, font=("Segoe UI", 8)).pack(anchor=tk.E, pady=1)
 
         # 4. Smooth Scrollable Container for Dynamic AI Results
-        sb_scroll_wrap = tk.Frame(self.sidebar_frame, bg=C_CARD)
+        self.sb_scroll_wrap = tk.Frame(self.sidebar_frame, bg=C_CARD)
+        sb_scroll_wrap = self.sb_scroll_wrap
         sb_scroll_wrap.pack(fill=tk.BOTH, expand=True, padx=8, pady=(2, 4))
 
         self.sb_canvas = tk.Canvas(sb_scroll_wrap, bg=C_CARD, highlightthickness=0, bd=0)
@@ -3212,33 +3278,30 @@ class BoneSuppressionApp(tk.Tk):
 
     def select_ai_module(self, mod_id):
         self.active_ai_module.set(mod_id)
-        colors = {
-            "suppress": "#0284c7",
-            "fracture": "#0d9488",
-            "mammo": "#be185d",
-            "ct3d": "#6366f1",
-            "pathology": "#7c3aed"
-        }
-        for mid, btn in self.mod_btns.items():
-            if mid == mod_id:
-                btn.config(bg=colors.get(mid, C_BLUE), fg="#ffffff", font=("Segoe UI", 8, "bold"))
-            else:
-                btn.config(bg="#141c2e", fg="#94a3b8", font=("Segoe UI", 8, "normal"))
-
-        # Update Main Run Button Text
-        if mod_id == "suppress":
-            self.btn_run_active.config(text="⚡ اجرای جداسازی استخوان (Bone Suppression)", bg=C_GREEN, activebackground=C_GREEN_HOVER)
-        elif mod_id == "fracture":
-            self.btn_run_active.config(text="🦴 کشف هوشمند شکستگی‌ها (Fracture AI)", bg="#d97706", activebackground="#f59e0b")
-        elif mod_id == "pathology":
-            self.btn_run_active.config(text="🫁 غربالگری ۱۸ بیماری ریه و قلب (DenseNet-18)", bg="#7c3aed", activebackground="#8b5cf6")
-        elif mod_id == "mammo":
-            self.btn_run_active.config(text="🩺 آنالیز ماموگرافی ۴ نمایه (BI-RADS AI)", bg="#ec4899", activebackground="#db2777")
-        elif mod_id == "ct3d":
-            self.btn_run_active.config(text="🧊 استودیوی ۳D سی‌تی اسکن (CT 3D Studio)", bg="#0284c7", activebackground="#0369a1")
+        for mid, item in self.mod_btns.items():
+            is_active = (mid == mod_id)
+            card_bg = "#0c1b2f" if is_active else "#060d19"
+            border_c = "#00e5ff" if is_active else "#162e4a"
+            if isinstance(item, tuple) and len(item) == 6:
+                c_frame, row_box, t_box, lbl_t, lbl_s, btn_sel = item
+                c_frame.config(highlightbackground=border_c, bg=card_bg)
+                row_box.config(bg=card_bg)
+                t_box.config(bg=card_bg)
+                lbl_t.config(bg=card_bg)
+                lbl_s.config(bg=card_bg)
+                btn_sel.config(
+                    text="ACTIVE MODULE ✓" if is_active else "SELECT MODULE ➔",
+                    bg="#0284c7" if is_active else "#0e1e33",
+                    fg="#ffffff" if is_active else "#94a3b8"
+                )
+            elif hasattr(item, "config"):
+                item.config(bg="#0284c7" if is_active else "#141c2e", fg="#ffffff" if is_active else "#94a3b8")
 
         self.refresh_sidebar_ui()
+        if hasattr(self, 'switch_sidebar_tab'):
+            self.switch_sidebar_tab("tools")
         self.render_view()
+        return
 
     def refresh_sidebar_ui(self):
         for w in self.sb_body.winfo_children():
