@@ -201,11 +201,11 @@ if os.path.exists(_v_file_candidate):
             if _file_ver:
                 APP_VERSION = _file_ver
             else:
-                APP_VERSION = "3.1.0"
+                APP_VERSION = "3.3.0"
     except Exception:
-        APP_VERSION = "3.1.0"
+        APP_VERSION = "3.3.0"
 else:
-    APP_VERSION = "3.1.0"
+    APP_VERSION = "3.3.0"
 APP_NAME_BASE = "نرم افزار تخصصی واحد تصویر برداری بیمارستان بوعلی - آرام مصطفائی"
 APP_TITLE = f"{APP_NAME_BASE} (نگارش v{APP_VERSION})"
 DEVELOPER_ROLE = "پرسنل واحد امور تصویربرداری بیمارستان بوعلی"
@@ -2380,7 +2380,7 @@ def parse_version_tuple(v_str):
     return tuple(parts[:3])
 
 class BoaliAutoUpdater:
-    def __init__(self, current_version="3.1.0", root_app=None):
+    def __init__(self, current_version=APP_VERSION, root_app=None):
         self.current_version = current_version
         self.root_app = root_app
         self.is_checking = False
@@ -2579,6 +2579,10 @@ class BoaliAutoUpdater:
 
             with zipfile.ZipFile(temp_zip, "r") as z:
                 z.extractall(exe_dir)
+                # If running inside PyInstaller directory, mirror all scripts & assets to _internal!
+                internal_dir = os.path.join(exe_dir, "_internal")
+                if os.path.isdir(internal_dir):
+                    z.extractall(internal_dir)
 
             if os.path.exists(temp_zip):
                 os.remove(temp_zip)
@@ -2588,8 +2592,13 @@ class BoaliAutoUpdater:
 
             # Write version.txt immediately to prevent any looping
             try:
-                with open(os.path.join(exe_dir, "version.txt"), "w", encoding="utf-8") as vf:
-                    vf.write(f"{new_version.lstrip('v')}\n")
+                target_ver = f"{new_version.lstrip('v')}\n"
+                for v_path in [os.path.join(exe_dir, "version.txt"), os.path.join(exe_dir, "_internal", "version.txt")]:
+                    try:
+                        with open(v_path, "w", encoding="utf-8") as vf:
+                            vf.write(target_ver)
+                    except Exception:
+                        pass
             except Exception:
                 pass
 
@@ -2602,7 +2611,17 @@ class BoaliAutoUpdater:
             if self.root_app:
                 self.root_app.destroy()
             
-            # Restart logic compatible with both compiled exe and python scripts
+            # Restart logic: If python interpreter is present, prefer launching updated .py directly!
+            # Otherwise re-exec current process.
+            bat_launcher = os.path.join(exe_dir, "اجرای_نرم_افزار_بوعلی.bat")
+            if os.path.isfile(bat_launcher):
+                try:
+                    import subprocess
+                    subprocess.Popen(["cmd.exe", "/c", bat_launcher], cwd=exe_dir)
+                    sys.exit(0)
+                except Exception:
+                    pass
+
             if getattr(sys, 'frozen', False):
                 os.execl(sys.executable, sys.executable)
             else:
@@ -2619,7 +2638,7 @@ class BoaliAutoUpdater:
 # ---------------------------------------------------------------------------
 _global_updater = None
 
-def get_updater(root_app=None, current_version="3.1.0"):
+def get_updater(root_app=None, current_version=APP_VERSION):
     global _global_updater
     if _global_updater is None:
         _global_updater = BoaliAutoUpdater(current_version=current_version, root_app=root_app)
@@ -2630,12 +2649,12 @@ def get_updater(root_app=None, current_version="3.1.0"):
             _global_updater.current_version = current_version
     return _global_updater
 
-def check_updates_manual(root_app, current_version="3.1.0"):
+def check_updates_manual(root_app, current_version=APP_VERSION):
     """بررسی دستی به‌روزرسانی توسط کاربر با نمایش پیام در صورت نبود آپدیت"""
     updater = get_updater(root_app, current_version)
     updater.check_for_updates_async(silent=False)
 
-def start_background_update_check(root_app, current_version="3.1.0", delay_sec=4):
+def start_background_update_check(root_app, current_version=APP_VERSION, delay_sec=4):
     """بررسی بی‌صدا و نامحسوس آپدیت در پس‌زمینه بعد از اجرای برنامه"""
     def _delayed():
         updater = get_updater(root_app, current_version)
