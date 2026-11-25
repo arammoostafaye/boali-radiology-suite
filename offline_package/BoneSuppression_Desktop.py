@@ -13,7 +13,7 @@ if getattr(sys, 'frozen', False) and not os.environ.get("_BOALI_RUNNING_EXTERNAL
             # Check if external script is modified/updated
             with open(ext_script, "r", encoding="utf-8") as _f_chk:
                 _head = _f_chk.read(5000)
-                if 'APP_VERSION = "3.6.1"' in _head or 'APP_VERSION = "3.6.1"' in _head or 'AI ENGINES' in _head or 'boali_splash_video' in _head:
+                if 'APP_VERSION = "3.6.2"' in _head or 'APP_VERSION = "3.6.2"' in _head or 'AI ENGINES' in _head or 'boali_splash_video' in _head:
                     os.environ["_BOALI_RUNNING_EXTERNAL"] = "1"
                     import importlib.util
                     spec = importlib.util.spec_from_file_location("__main__", ext_script)
@@ -243,11 +243,11 @@ if os.path.exists(_v_file_candidate):
             if _file_ver:
                 APP_VERSION = _file_ver
             else:
-                APP_VERSION = "3.6.1"
+                APP_VERSION = "3.6.2"
     except Exception:
-        APP_VERSION = "3.6.1"
+        APP_VERSION = "3.6.2"
 else:
-    APP_VERSION = "3.6.1"
+    APP_VERSION = "3.6.2"
 APP_NAME_BASE = "نرم افزار تخصصی واحد تصویر برداری بیمارستان بوعلی - آرام مصطفائی"
 APP_TITLE = f"{APP_NAME_BASE} (نگارش v{APP_VERSION})"
 DEVELOPER_ROLE = "پرسنل واحد امور تصویربرداری بیمارستان بوعلی"
@@ -3990,15 +3990,18 @@ class BoneSuppressionApp(tk.Tk):
     # -------------------------------------------------------------------------
     def check_app_updates(self):
         """بررسی دستی به‌روزرسانی نرم‌افزار از مخزن گیت‌هاب"""
-        if check_updates_manual:
-            check_updates_manual(self, current_version=APP_VERSION)
-        else:
-            messagebox.showinfo("به‌روزرسانی", "ماژول به‌روزرسانی خودکار در دسترس نیست.")
+        try:
+            updater = BoaliAutoUpdater(current_version=APP_VERSION, root_app=self)
+            updater.check_for_updates_async(silent=False)
+        except Exception as e:
+            messagebox.showinfo("به‌روزرسانی", f"سیستم به‌روزرسانی: {e}")
 
     def _start_auto_update_bg(self):
         """بررسی نامحسوس پس‌زمینه در هنگام شروع به کار نرم‌افزار"""
-        if start_background_update_check:
-            start_background_update_check(self, current_version=APP_VERSION, delay_sec=12)
+        try:
+            self.after(10000, lambda: BoaliAutoUpdater(current_version=APP_VERSION, root_app=self).check_for_updates_async(silent=True))
+        except Exception:
+            pass
 
     def open_about(self):
         ModernAboutDialog(self)
