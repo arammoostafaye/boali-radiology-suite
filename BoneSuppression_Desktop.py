@@ -1,3 +1,30 @@
+# =============================================================================
+# DYNAMIC HOT-RELOAD PROXY FOR PYINSTALLER STANDALONE EXE
+# Enables BoneSuppressionAI.exe to execute newly downloaded patches without re-compiling!
+# =============================================================================
+import sys
+import os
+
+if getattr(sys, 'frozen', False) and not os.environ.get("_BOALI_RUNNING_EXTERNAL"):
+    exe_dir = os.path.dirname(sys.executable)
+    ext_script = os.path.join(exe_dir, "BoneSuppression_Desktop.py")
+    if os.path.isfile(ext_script):
+        try:
+            # Check if external script is modified/updated
+            with open(ext_script, "r", encoding="utf-8") as _f_chk:
+                _head = _f_chk.read(5000)
+                if 'APP_VERSION = "3.5.0"' in _head or 'APP_VERSION = "3.5.0"' in _head or 'AI ENGINES' in _head or 'boali_splash_video' in _head:
+                    os.environ["_BOALI_RUNNING_EXTERNAL"] = "1"
+                    import importlib.util
+                    spec = importlib.util.spec_from_file_location("__main__", ext_script)
+                    mod = importlib.util.module_from_spec(spec)
+                    sys.modules["__main__"] = mod
+                    spec.loader.exec_module(mod)
+                    sys.exit(0)
+        except Exception as _e_proxy:
+            print(f"Proxy loader fallback: {_e_proxy}")
+# =============================================================================
+
 """
 BoneSuppression AI - Clinical Multi-AI Chest Radiograph Workstation
 Native Offline Windows Desktop Application
@@ -201,11 +228,11 @@ if os.path.exists(_v_file_candidate):
             if _file_ver:
                 APP_VERSION = _file_ver
             else:
-                APP_VERSION = "3.4.0"
+                APP_VERSION = "3.5.0"
     except Exception:
-        APP_VERSION = "3.4.0"
+        APP_VERSION = "3.5.0"
 else:
-    APP_VERSION = "3.4.0"
+    APP_VERSION = "3.5.0"
 APP_NAME_BASE = "نرم افزار تخصصی واحد تصویر برداری بیمارستان بوعلی - آرام مصطفائی"
 APP_TITLE = f"{APP_NAME_BASE} (نگارش v{APP_VERSION})"
 DEVELOPER_ROLE = "پرسنل واحد امور تصویربرداری بیمارستان بوعلی"
@@ -2416,12 +2443,21 @@ class BoaliAutoUpdater:
             # Find the update patch zip asset
             update_asset_url = None
             assets = data.get("assets", [])
-            # Priority 1: Patch or Update zip
-            for asset in assets:
-                name = asset.get("name", "")
-                if "Patch.zip" in name or "Update.zip" in name or "Update-Only.zip" in name:
-                    update_asset_url = asset.get("browser_download_url")
-                    break
+            # Smart Priority Asset Selection:
+            # If running as compiled EXE, prefer BoneSuppressionAI-Update-Only.zip which contains the updated .EXE binary!
+            is_frozen = getattr(sys, 'frozen', False)
+            if is_frozen:
+                for asset in assets:
+                    name = asset.get("name", "")
+                    if "Update-Only.zip" in name:
+                        update_asset_url = asset.get("browser_download_url")
+                        break
+            if not update_asset_url:
+                for asset in assets:
+                    name = asset.get("name", "")
+                    if "Update.zip" in name or "Patch.zip" in name or "Update-Only.zip" in name:
+                        update_asset_url = asset.get("browser_download_url")
+                        break
             # Priority 2: Any zip if not found
             if not update_asset_url:
                 for asset in assets:
