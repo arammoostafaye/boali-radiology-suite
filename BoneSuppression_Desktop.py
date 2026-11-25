@@ -201,11 +201,11 @@ if os.path.exists(_v_file_candidate):
             if _file_ver:
                 APP_VERSION = _file_ver
             else:
-                APP_VERSION = "3.0.3"
+                APP_VERSION = "3.1.0"
     except Exception:
-        APP_VERSION = "3.0.3"
+        APP_VERSION = "3.1.0"
 else:
-    APP_VERSION = "3.0.3"
+    APP_VERSION = "3.1.0"
 APP_NAME_BASE = "نرم افزار تخصصی واحد تصویر برداری بیمارستان بوعلی - آرام مصطفائی"
 APP_TITLE = f"{APP_NAME_BASE} (نگارش v{APP_VERSION})"
 DEVELOPER_ROLE = "پرسنل واحد امور تصویربرداری بیمارستان بوعلی"
@@ -2380,7 +2380,7 @@ def parse_version_tuple(v_str):
     return tuple(parts[:3])
 
 class BoaliAutoUpdater:
-    def __init__(self, current_version="3.0.3", root_app=None):
+    def __init__(self, current_version="3.1.0", root_app=None):
         self.current_version = current_version
         self.root_app = root_app
         self.is_checking = False
@@ -2619,7 +2619,7 @@ class BoaliAutoUpdater:
 # ---------------------------------------------------------------------------
 _global_updater = None
 
-def get_updater(root_app=None, current_version="3.0.3"):
+def get_updater(root_app=None, current_version="3.1.0"):
     global _global_updater
     if _global_updater is None:
         _global_updater = BoaliAutoUpdater(current_version=current_version, root_app=root_app)
@@ -2630,12 +2630,12 @@ def get_updater(root_app=None, current_version="3.0.3"):
             _global_updater.current_version = current_version
     return _global_updater
 
-def check_updates_manual(root_app, current_version="3.0.3"):
+def check_updates_manual(root_app, current_version="3.1.0"):
     """بررسی دستی به‌روزرسانی توسط کاربر با نمایش پیام در صورت نبود آپدیت"""
     updater = get_updater(root_app, current_version)
     updater.check_for_updates_async(silent=False)
 
-def start_background_update_check(root_app, current_version="3.0.3", delay_sec=4):
+def start_background_update_check(root_app, current_version="3.1.0", delay_sec=4):
     """بررسی بی‌صدا و نامحسوس آپدیت در پس‌زمینه بعد از اجرای برنامه"""
     def _delayed():
         updater = get_updater(root_app, current_version)
