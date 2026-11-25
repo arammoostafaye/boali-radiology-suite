@@ -1,0 +1,43 @@
+/* ==========================================================================
+   Cyber-Radiology Design System (2026 Edition)
+   Medical Grade Color Tokens, Dark Frosted Glass, Neon Glows & Micro-Spacing
+   Hospital: Boali Hospital Marivan | Lead: Aram Mostafaei
+   ========================================================================== */
+
+:root {
+  /* Core Futuristic Cyber Palette */
+  --cyber-bg-space: #030611;          /* Deepest cosmic void */
+  --cyber-bg-base: #050b16;           /* Main viewport background */
+  --cyber-bg-panel: rgba(11, 23, 40, 0.75); /* Frosted glass panel */
+  --cyber-bg-card: rgba(13, 27, 48, 0.6);   /* Interactive module card */
+  --cyber-bg-card-hover: rgba(17, 36, 64, 0.85);
+
+  /* Neon Diagnostic Accents */
+  --cyber-cyan: #00dfff;              /* Primary telemetry neon cyan */
+  --cyber-cyan-glow: rgba(0, 223, 255, 0.35);
+  --cyber-cyan-subtle: rgba(0, 223, 255, 0.12);
+  --cyber-blue: #1788bd;              /* Clinical secondary blue */
+  --cyber-magenta: #c44bce;           /* Mammo & pathology neon accent */
+  --cyber-magenta-glow: rgba(196, 75, 206, 0.35);
+  --cyber-emerald: #10b981;           /* Normal range & success metric */
+  --cyber-emerald-glow: rgba(16, 185, 129, 0.35);
+  --cyber-amber: #f59e0b;             /* Caution & alert metric */
+  --cyber-rose: #f43f5e;              /* Acute fracture & critical finding */
+
+  /* Surface & Glass Borders */
+  --cyber-border-dim: rgba(22, 46, 74, 0.8);
+  --cyber-border-bright: rgba(0, 223, 255, 0.45);
+  --cyber-border-active: #00dfff;
+
+  /* Typography Colors */
+  --cyber-text-primary: #f8fafc;
+  --cyber-text-secondary: #94a3b8;
+  --cyber-text-dim: #64748b;
+  --cyber-text-cyan: #38bdf8;
+
+  /* Spatial Geometry */
+  --radius-hud: 18px;
+  --radius-card: 14px;
+  --radius-pill: 24px;
+  --radius-sm: 8px;
+}
