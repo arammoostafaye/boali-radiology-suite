@@ -13,7 +13,7 @@ if getattr(sys, 'frozen', False) and not os.environ.get("_BOALI_RUNNING_EXTERNAL
             # Check if external script is modified/updated
             with open(ext_script, "r", encoding="utf-8") as _f_chk:
                 _head = _f_chk.read(5000)
-                if 'APP_VERSION = "3.5.0"' in _head or 'APP_VERSION = "3.5.0"' in _head or 'AI ENGINES' in _head or 'boali_splash_video' in _head:
+                if 'APP_VERSION = "3.6.0"' in _head or 'APP_VERSION = "3.6.0"' in _head or 'AI ENGINES' in _head or 'boali_splash_video' in _head:
                     os.environ["_BOALI_RUNNING_EXTERNAL"] = "1"
                     import importlib.util
                     spec = importlib.util.spec_from_file_location("__main__", ext_script)
@@ -228,11 +228,11 @@ if os.path.exists(_v_file_candidate):
             if _file_ver:
                 APP_VERSION = _file_ver
             else:
-                APP_VERSION = "3.5.0"
+                APP_VERSION = "3.6.0"
     except Exception:
-        APP_VERSION = "3.5.0"
+        APP_VERSION = "3.6.0"
 else:
-    APP_VERSION = "3.5.0"
+    APP_VERSION = "3.6.0"
 APP_NAME_BASE = "نرم افزار تخصصی واحد تصویر برداری بیمارستان بوعلی - آرام مصطفائی"
 APP_TITLE = f"{APP_NAME_BASE} (نگارش v{APP_VERSION})"
 DEVELOPER_ROLE = "پرسنل واحد امور تصویربرداری بیمارستان بوعلی"
@@ -2443,19 +2443,16 @@ class BoaliAutoUpdater:
             # Find the update patch zip asset
             update_asset_url = None
             assets = data.get("assets", [])
-            # Smart Priority Asset Selection:
-            # If running as compiled EXE, prefer BoneSuppressionAI-Update-Only.zip which contains the updated .EXE binary!
-            is_frozen = getattr(sys, 'frozen', False)
-            if is_frozen:
-                for asset in assets:
-                    name = asset.get("name", "")
-                    if "Update-Only.zip" in name:
-                        update_asset_url = asset.get("browser_download_url")
-                        break
+            # Select the fast lightweight update zip (5MB) which updates all scripts, assets, and loaders!
+            for asset in assets:
+                name = asset.get("name", "")
+                if "Radiology_Suite" in name and name.endswith(".zip"):
+                    update_asset_url = asset.get("browser_download_url")
+                    break
             if not update_asset_url:
                 for asset in assets:
                     name = asset.get("name", "")
-                    if "Update.zip" in name or "Patch.zip" in name or "Update-Only.zip" in name:
+                    if "Update.zip" in name or "Patch.zip" in name:
                         update_asset_url = asset.get("browser_download_url")
                         break
             # Priority 2: Any zip if not found
@@ -2592,13 +2589,18 @@ class BoaliAutoUpdater:
 
     def _download_and_extract_patch(self, url, dlg, prog_bar, lbl_status):
         try:
-            exe_dir = os.path.dirname(os.path.abspath(__file__))
+            # 1. Determine execution directory robustly
+            if getattr(sys, 'frozen', False):
+                exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+            else:
+                exe_dir = os.path.dirname(os.path.abspath(__file__))
+
             temp_zip = os.path.join(exe_dir, "temp_update_patch.zip")
 
             req = urllib.request.Request(url, headers={"User-Agent": "Boali-Radiology-Suite-Desktop"})
             with urllib.request.urlopen(req) as resp, open(temp_zip, "wb") as out_f:
                 total_len = resp.getheader('content-length')
-                total_bytes = int(total_len) if total_len else 1000000
+                total_bytes = int(total_len) if total_len else 6000000
                 dl = 0
                 while True:
                     chunk = resp.read(65536)
@@ -2606,100 +2608,74 @@ class BoaliAutoUpdater:
                         break
                     dl += len(chunk)
                     out_f.write(chunk)
-                    pct = int(dl * 100 / total_bytes)
+                    pct = int(dl * 100 / total_bytes) if total_bytes else 50
+                    pct = min(pct, 100)
                     prog_bar["value"] = pct
-                    lbl_status.config(text=f"در حال دانلود: {dl // 1024} KB / {total_bytes // 1024} KB ({pct}%)")
+                    lbl_status.config(text=f"در حال دریافت پکیج سبک: {dl // 1024} KB / {total_bytes // 1024} KB ({pct}%)")
 
             lbl_status.config(text="در حال استخراج و جایگزینی فایل‌های به‌روزرسانی...")
             time.sleep(0.5)
 
             with zipfile.ZipFile(temp_zip, "r") as z:
                 z.extractall(exe_dir)
-                # If running inside PyInstaller directory, mirror all scripts & assets to _internal!
                 internal_dir = os.path.join(exe_dir, "_internal")
                 if os.path.isdir(internal_dir):
                     z.extractall(internal_dir)
 
             if os.path.exists(temp_zip):
-                os.remove(temp_zip)
+                try:
+                    os.remove(temp_zip)
+                except Exception:
+                    pass
 
-            lbl_status.config(text="✓ به‌روزرسانی با موفقیت انجام شد! در حال راه‌اندازی مجدد...")
-            time.sleep(1.0)
+            lbl_status.config(text="✓ به‌روزرسانی با موفقیت انجام شد! در حال آماده‌سازی اجرای مجدد...")
+            time.sleep(0.5)
 
-            # Write version.txt immediately to prevent any looping
-            try:
-                target_ver = f"{new_version.lstrip('v')}\n"
-                for v_path in [os.path.join(exe_dir, "version.txt"), os.path.join(exe_dir, "_internal", "version.txt")]:
-                    try:
-                        with open(v_path, "w", encoding="utf-8") as vf:
-                            vf.write(target_ver)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+            # Write version.txt to both exe_dir and _internal
+            new_v_str = "3.6.0"
+            for v_path in [os.path.join(exe_dir, "version.txt"), os.path.join(exe_dir, "_internal", "version.txt")]:
+                try:
+                    with open(v_path, "w", encoding="utf-8") as vf:
+                        vf.write(f"{new_v_str}\n")
+                except Exception:
+                    pass
 
-            # Restart app
+            # Create a dedicated launcher batch file that uses the Python runtime inside _internal
+            launcher_bat = os.path.join(exe_dir, "اجرای_نرم_افزار_بوعلی.bat")
+            with open(launcher_bat, "w", encoding="utf-8") as bf:
+                bf.write(f"""@echo off
+title نرم‌افزار تخصصی واحد تصویربرداری بیمارستان بوعلی - آرام مصطفائی (v{new_v_str})
+cd /d "%~dp0"
+if exist "_internal\\python.exe" (
+    start "" "_internal\\python.exe" "BoneSuppression_Desktop.py"
+    exit /b 0
+)
+if exist "python.exe" (
+    start "" "python.exe" "BoneSuppression_Desktop.py"
+    exit /b 0
+)
+start "" "BoneSuppressionAI.exe"
+exit /b 0
+""")
+
             messagebox.showinfo(
-                "به‌روزرسانی موفق",
-                "پچ نگارش جدید با موفقیت روی سیستم شما اعمال شد.\nجهت بارگذاری کامل، نرم‌افزار را مجدداً باز فرمایید."
+                "به‌روزرسانی با موفقیت اعمال شد",
+                f"نگارش جدید (v{new_v_str}) با موفقیت نصب شد.\nنرم‌افزار اکنون جهت بارگذاری ظاهر جدید مجدداً راه‌اندازی می‌شود."
             )
             dlg.destroy()
             if self.root_app:
                 self.root_app.destroy()
-            
-            # Restart logic: If python interpreter is present, prefer launching updated .py directly!
-            # Otherwise re-exec current process.
-            bat_launcher = os.path.join(exe_dir, "اجرای_نرم_افزار_بوعلی.bat")
-            if os.path.isfile(bat_launcher):
-                try:
-                    import subprocess
-                    subprocess.Popen(["cmd.exe", "/c", bat_launcher], cwd=exe_dir)
-                    sys.exit(0)
-                except Exception:
-                    pass
 
-            if getattr(sys, 'frozen', False):
-                os.execl(sys.executable, sys.executable)
-            else:
-                main_script = os.path.join(exe_dir, "BoneSuppression_Desktop.py")
-                os.execl(sys.executable, sys.executable, main_script)
+            # Execute launcher
+            import subprocess
+            subprocess.Popen(["cmd.exe", "/c", launcher_bat], cwd=exe_dir, shell=True)
+            sys.exit(0)
 
         except Exception as e:
-            lbl_status.config(text=f"خطا در به‌روزرسانی: {e}", fg="#F87171")
-            messagebox.showerror("خطای به‌روزرسانی", f"فرآیند دانلود یا نصب خودکار با خطا مواجه شد:\n{e}")
-
-
-# ---------------------------------------------------------------------------
-# Convenient Module-Level Functions
-# ---------------------------------------------------------------------------
-_global_updater = None
-
-def get_updater(root_app=None, current_version=APP_VERSION):
-    global _global_updater
-    if _global_updater is None:
-        _global_updater = BoaliAutoUpdater(current_version=current_version, root_app=root_app)
-    else:
-        if root_app:
-            _global_updater.root_app = root_app
-        if current_version:
-            _global_updater.current_version = current_version
-    return _global_updater
-
-def check_updates_manual(root_app, current_version=APP_VERSION):
-    """بررسی دستی به‌روزرسانی توسط کاربر با نمایش پیام در صورت نبود آپدیت"""
-    updater = get_updater(root_app, current_version)
-    updater.check_for_updates_async(silent=False)
-
-def start_background_update_check(root_app, current_version=APP_VERSION, delay_sec=4):
-    """بررسی بی‌صدا و نامحسوس آپدیت در پس‌زمینه بعد از اجرای برنامه"""
-    def _delayed():
-        updater = get_updater(root_app, current_version)
-        updater.check_for_updates_async(silent=True)
-    if hasattr(root_app, "after"):
-        root_app.after(int(delay_sec * 1000), _delayed)
-    else:
-        import threading
-        threading.Timer(delay_sec, _delayed).start()
+            err_msg = f"خطا در اعمال به‌روزرسانی:\n{e}\n{traceback.format_exc()}"
+            lbl_status.config(text="خطا در اعمال به‌روزرسانی!")
+            messagebox.showerror("خطای به‌روزرسانی", err_msg)
+            dlg.destroy()
 
 
 class BoneSuppressionApp(tk.Tk):
